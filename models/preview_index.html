@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>宠物 3D 模型预览总览</title>
+<style>
+  body { margin:0; padding:24px; background:#FFF6E8; font-family:"Microsoft YaHei",sans-serif; color:#6B5327; }
+  h1 { font-size:24px; } h2 { font-size:18px; margin-top:32px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:20px; }
+  .card { background:#fff; border-radius:16px; padding:12px; box-shadow:0 2px 10px rgba(0,0,0,.08); text-align:center; }
+  .card img { width:100%; border-radius:12px; background:#000; }
+  .card a { display:inline-block; margin-top:8px; color:#C0392B; text-decoration:none; font-weight:bold; }
+  .todo { color:#B26B00; }
+  .ok { color:#2E7D32; font-weight:bold; }
+</style>
+</head>
+<body>
+<h1>🐾 宠物 3D 模型预览总览（MVP 毛虫系）</h1>
+<p>点击卡片链接可打开 3D 可旋转预览（拖动旋转 / 滚轮缩放）。</p>
+
+<h2>团团（杏黄仓鼠 · 普通⚪）</h2>
+<div class="grid">
+  <div class="card"><img src="tuantuan_egg/tuantuan_egg_preview.png"><br>卵期（自带小表情彩蛋）<br><a href="../tuantuan_egg/viewer.html">▶ 3D 预览</a></div>
+  <div class="card"><img src="tuantuan_baby/tuantuan_baby_preview.png"><br>幼崽「团籽」<br><a href="../tuantuan_baby/viewer.html">▶ 3D 预览</a></div>
+  <div class="card"><img src="sample_tuantuan/tuantuan_preview.png"><br>成体「团团」<br><a href="../sample_tuantuan/viewer.html">▶ 3D 预览</a></div>
+  <div class="card"><img src="tuantuan_final/tuantuan_final_preview.png"><br>完全体「囤宝·团团」<br><a href="../tuantuan_final/viewer.html">▶ 3D 预览</a></div>
+</div>
+
+<h2>长风（天青垂耳兔 · 稀有🔵）</h2>
+<div class="grid">
+  <div class="card todo">卵期 — 待生成（明日额度恢复）</div>
+  <div class="card todo">幼崽「风芽」— 待生成</div>
+  <div class="card todo">成体「长风」— 待生成</div>
+  <div class="card todo">完全体「逐风·长风」— 待生成</div>
+</div>
+
+<h2>阿绒（霞粉狐狸 · 史诗🟣）</h2>
+<div class="grid">
+  <div class="card todo">卵期 — 待生成（明日额度恢复）</div>
+  <div class="card todo">幼崽「绒球」— 待生成</div>
+  <div class="card todo">成体「阿绒」— 待生成</div>
+  <div class="card todo">完全体「拥云·阿绒」— 待生成</div>
+</div>
+
+<p class="todo">说明：3D 生成服务每日限额 5 个，今日额度已用于团团全线；剩余 8 个模型明日额度恢复后继续。</p>
+</body>
+</html>
