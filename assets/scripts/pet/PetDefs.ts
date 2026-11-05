@@ -6,7 +6,7 @@
  */
 
 import { Xi, Rarity, Stage } from '../core/Enums';
-import { PetDefStatic } from '../core/SaveData';
+import { PetDefStatic, PetLines } from '../core/SaveData';
 
 /** 辅助函数：生成占位资源路径 */
 const M = (stage: Stage, id: string): string => `resources/models/${id}/${id}_${stage}.glb`;
@@ -87,48 +87,68 @@ export const PetDefs: Record<string, PetDefStatic> = {
   },
 
   // 毛虫系 phase2 占位
-  mao_p1_a: placeholderPet('mao_p1_a', Xi.Mao, '待定·甲', Rarity.Common),
-  mao_p1_b: placeholderPet('mao_p1_b', Xi.Mao, '待定·乙', Rarity.Legend),
+  mao_p1_a: placeholderPet('mao_p1_a', Xi.Mao, '待定·甲', Rarity.Common, 1, 2),
+  mao_p1_b: placeholderPet('mao_p1_b', Xi.Mao, '待定·乙', Rarity.Legend, 1, 2),
 
   // ============ 羽虫系（占位） ============
   yu_p1_a: placeholderPet('yu_p1_a', Xi.Yu, '待定·风语', Rarity.Common),
   yu_p1_b: placeholderPet('yu_p1_b', Xi.Yu, '待定·赤翎', Rarity.Rare),
   yu_p1_c: placeholderPet('yu_p1_c', Xi.Yu, '待定·玄羽', Rarity.Epic),
-  yu_p2_a: placeholderPet('yu_p2_a', Xi.Yu, '待定·丁', Rarity.Common),
-  yu_p2_b: placeholderPet('yu_p2_b', Xi.Yu, '待定·戊', Rarity.Legend),
+  yu_p2_a: placeholderPet('yu_p2_a', Xi.Yu, '待定·丁', Rarity.Common, 1, 2),
+  yu_p2_b: placeholderPet('yu_p2_b', Xi.Yu, '待定·戊', Rarity.Legend, 1, 2),
 
   // ============ 鳞虫系（占位） ============
   lin_p1_a: placeholderPet('lin_p1_a', Xi.Lin, '待定·小浪', Rarity.Common),
   lin_p1_b: placeholderPet('lin_p1_b', Xi.Lin, '待定·碧渊', Rarity.Rare),
   lin_p1_c: placeholderPet('lin_p1_c', Xi.Lin, '待定·银鳞', Rarity.Epic),
-  lin_p2_a: placeholderPet('lin_p2_a', Xi.Lin, '待定·丁', Rarity.Common),
-  lin_p2_b: placeholderPet('lin_p2_b', Xi.Lin, '待定·戊', Rarity.Legend),
+  lin_p2_a: placeholderPet('lin_p2_a', Xi.Lin, '待定·丁', Rarity.Common, 1, 2),
+  lin_p2_b: placeholderPet('lin_p2_b', Xi.Lin, '待定·戊', Rarity.Legend, 1, 2),
 
   // ============ 介虫系（占位） ============
   jie_p1_a: placeholderPet('jie_p1_a', Xi.Jie, '待定·壳壳', Rarity.Common),
   jie_p1_b: placeholderPet('jie_p1_b', Xi.Jie, '待定·玄甲', Rarity.Rare),
   jie_p1_c: placeholderPet('jie_p1_c', Xi.Jie, '待定·霜盔', Rarity.Epic),
-  jie_p2_a: placeholderPet('jie_p2_a', Xi.Jie, '待定·丁', Rarity.Common),
-  jie_p2_b: placeholderPet('jie_p2_b', Xi.Jie, '待定·戊', Rarity.Legend),
+  jie_p2_a: placeholderPet('jie_p2_a', Xi.Jie, '待定·丁', Rarity.Common, 1, 2),
+  jie_p2_b: placeholderPet('jie_p2_b', Xi.Jie, '待定·戊', Rarity.Legend, 1, 2),
 
   // ============ 倮虫系（占位） ============
   luo_p1_a: placeholderPet('luo_p1_a', Xi.Luo, '待定·软糖', Rarity.Common),
   luo_p1_b: placeholderPet('luo_p1_b', Xi.Luo, '待定·璃珠', Rarity.Rare),
   luo_p1_c: placeholderPet('luo_p1_c', Xi.Luo, '待定·幽瞳', Rarity.Epic),
-  luo_p2_a: placeholderPet('luo_p2_a', Xi.Luo, '待定·丁', Rarity.Common),
-  luo_p2_b: placeholderPet('luo_p2_b', Xi.Luo, '待定·戊', Rarity.Legend),
+  luo_p2_a: placeholderPet('luo_p2_a', Xi.Luo, '待定·丁', Rarity.Common, 1, 2),
+  luo_p2_b: placeholderPet('luo_p2_b', Xi.Luo, '待定·戊', Rarity.Legend, 1, 2),
 };
 
+/** 混世四猴静态定义（独立池：四猴混世，不入十类之种、不在五虫体系内） */
+export interface MonkeyDefStatic {
+  id: string;
+  pool: 'four_monkeys';                // 独立池标记（不复用五系枚举）
+  name: string;
+  rarity: Rarity;
+  phase: 2;                            // 终局内容
+  unlockLayer: 2;                      // 二层 · 混世四猴
+  models: Partial<Record<Stage, string>>;
+  anims: Partial<Record<Stage, string[]>>;
+  themeColor: string;
+  signature: string;
+  lines: PetLines;
+}
+
 /** 混世四猴（终局隐藏池，五虫 25 只全完全体后解锁） */
-export const FourMonkeys: Record<string, PetDefStatic> = {
-  monkey_lingshi: placeholderPet('monkey_lingshi', Xi.Luo, '灵明石猴', Rarity.Legend, 2),
-  monkey_chibi: placeholderPet('monkey_chibi', Xi.Luo, '赤尻马猴', Rarity.Legend, 2),
-  monkey_tongti: placeholderPet('monkey_tongti', Xi.Luo, '通臂猿猴', Rarity.Legend, 2),
-  monkey_biming: placeholderPet('monkey_biming', Xi.Luo, '混世魔王·六耳猕猴', Rarity.Legend, 2),
+export const FourMonkeys: Record<string, MonkeyDefStatic> = {
+  monkey_lingshi: placeholderMonkey('monkey_lingshi', '灵明石猴'),
+  monkey_chibi: placeholderMonkey('monkey_chibi', '赤尻马猴'),
+  monkey_tongti: placeholderMonkey('monkey_tongti', '通臂猿猴'),
+  monkey_biming: placeholderMonkey('monkey_biming', '六耳猕猴'),
 };
 
 /** 所有可孵化物种（五虫 25 只） */
 export const ALL_SPECIES: PetDefStatic[] = Object.values(PetDefs);
+
+/** MVP 实装池（毛虫系 phase1 3 只）——产蛋/抽取只从这里来，随实装范围扩池 */
+export const MVP_SPECIES: PetDefStatic[] = ALL_SPECIES.filter(
+  s => s.phase === 1 && s.xi === Xi.Mao,
+);
 
 /** 按系查询 */
 export function getSpeciesByXi(xi: Xi): PetDefStatic[] {
@@ -144,10 +164,35 @@ export function getSpecies(id: string): PetDefStatic | undefined {
 function placeholderPet(
   id: string, xi: Xi, name: string, rarity: Rarity,
   unlockLayer: 1 | 2 | 3 | 4 | 5 = 1,
+  phase: 1 | 2 = 1,
 ): PetDefStatic {
   return {
     id, xi, name, rarity,
-    phase: 1, unlockLayer,
+    phase, unlockLayer,
+    themeColor: '#CCCCCC',
+    signature: 'signature_placeholder',
+    models: {},
+    anims: {
+      [Stage.Egg]: ['egg_breathe', 'egg_sway'],
+      [Stage.Baby]: ['idle', 'happy', 'sad', 'pet', 'feed'],
+      [Stage.Adult]: ['idle', 'happy', 'sad', 'pet', 'feed', 'play', 'explore_ready'],
+      [Stage.Final]: ['idle', 'happy', 'sad', 'pet', 'feed', 'play', 'explore_ready', 'signature_placeholder'],
+    },
+    lines: {
+      happy: ['~'], sad: ['……'], away: ['……'], feed: ['~'], pet: ['~'],
+    },
+  };
+}
+
+/** 辅助：生成混世四猴占位定义（独立池，全传说） */
+function placeholderMonkey(id: string, name: string): MonkeyDefStatic {
+  return {
+    id,
+    pool: 'four_monkeys',
+    name,
+    rarity: Rarity.Legend,
+    phase: 2,
+    unlockLayer: 2,
     themeColor: '#CCCCCC',
     signature: 'signature_placeholder',
     models: {},

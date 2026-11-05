@@ -20,7 +20,7 @@ export class DragFeed {
     }
     save.food -= 1;
     pet.companionship += GameConfig.INTERACT.FEED_COMPANIONSHIP;
-    pet.lastInteractTs = TimeService.now();
+    pet.lastInteractTs = TimeService.safeNow(save.lastSeenTs);
     PetMemory.add(save, MemoryEventType.Feeding, foodName);
     Events.emit(EventName.FoodChanged, save.food);
     Events.emit(EventName.PetInteracted, pet.id, 'feed');

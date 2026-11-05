@@ -25,16 +25,17 @@ export class PetBehavior {
 
   /** 根据存档 + 宠物状态计算输入 */
   static computeInput(save: SaveData, pet: PetState): BehaviorInput {
-    const offlineHours = TimeService.offlineHoursSince(save.lastSeenTs);
-    const todayStart = TimeService.todayMidnight();
-    const todayFeed = PetMemory.feedCountSince(save, TimeService.msUntilNextDay() / 3600_000 + 1);
-    const todayPlay = PetMemory.playCountSince(save, TimeService.msUntilNextDay() / 3600_000 + 1);
-    const todayInteractions = todayFeed + todayPlay +
-      // 简化：MemoryEventType.Pet 目前还没写入，先估 companionship 增量
-      Math.max(0, Math.floor(pet.companionship / 3));
+    const now = TimeService.safeNow(save.lastSeenTs);
+    const offlineHours = TimeService.offlineMsSince(save.lastSeenTs) / 3600_000;
+
+    // "今日" = 自然日：回看至今天零点
+    const hoursSinceMidnight = Math.max(0, (now - TimeService.todayMidnight()) / 3600_000);
+    const todayInteractions =
+      PetMemory.feedCountSince(save, hoursSinceMidnight) +
+      PetMemory.playCountSince(save, hoursSinceMidnight) +
+      PetMemory.petCountSince(save, hoursSinceMidnight);
 
     // 最近一次喂食 / 玩耍距现在几小时
-    const now = TimeService.now();
     const findHoursAgo = (type: string): number => {
       for (let i = save.memory.length - 1; i >= 0; i--) {
         if (save.memory[i].type === type) {

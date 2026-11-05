@@ -1,0 +1,12 @@
+{
+    "name": "PetCompanionship",
+    "uuid": "282a056a-9866-4158-9aa3-bc49e7dcadae",
+    "creator": {
+        "version": "3.8.8"
+    },
+    "type": "3d",
+    "version": "1.0.0",
+    "devDependencies": {
+        "typescript": "^5.9.3"
+    }
+}

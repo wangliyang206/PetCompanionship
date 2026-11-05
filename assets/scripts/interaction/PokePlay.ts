@@ -17,20 +17,21 @@ export class PokePlay {
   static poke(save: SaveData, pet: PetState): number {
     const delta = GameConfig.INTERACT.POKE_COMPANIONSHIP;
     pet.companionship += delta;
-    pet.lastInteractTs = TimeService.now();
+    pet.lastInteractTs = TimeService.safeNow(save.lastSeenTs);
     PetMemory.add(save, MemoryEventType.Playing);
     Events.emit(EventName.PetInteracted, pet.id, 'play');
     return delta;
   }
 
   /**
-   * 长按蛋破壳加速。
-   * 初始蛋：每次缩短最多 STARTER_TOUCH_REDUCE_MAX_MIN 分钟。
-   * 非初始蛋：每次缩短最多 NORMAL_TOUCH_REDUCE_MAX_MIN 分钟。
+   * 长按蛋破壳加速（仅孵化中的蛋可摸，窝边排队蛋不可加速）。
+   * 初始蛋：累计最多缩短至 STARTER_TOUCH_FAST_MIN。
+   * 非初始蛋：累计最多缩短 NORMAL_TOUCH_REDUCE_MAX_MIN。
    * 直接修改 egg.hatchesAt（向现在靠近）。
    */
   static longPressEgg(save: SaveData, egg: EggState): number {
-    const now = TimeService.now();
+    if (!egg.incubating) return 0; // 排队中的蛋还没开始孵
+    const now = TimeService.safeNow(save.lastSeenTs);
     const hatchMs = GameConfig.INTERACT.TOUCH_EGG_REDUCE_MIN * 60_000; // 每次缩短 2 分钟
     let reduce = hatchMs;
 
@@ -59,13 +60,14 @@ export class PokePlay {
 
   /** 蛋是否已经到孵化时间（用于倒计时结束） */
   static isEggReady(save: SaveData, egg: EggState): boolean {
-    return TimeService.now() >= egg.hatchesAt;
+    return egg.incubating && TimeService.safeNow(save.lastSeenTs) >= egg.hatchesAt;
   }
 
   /** 获取当前正在孵的蛋（若有） */
   static getIncubatingEgg(save: SaveData): EggState | undefined {
     // 同一时间只能孵 1 颗（GameConfig.EGG.INCUBATION_SLOTS = 1）
-    return save.eggs.find(e => TimeService.now() < e.hatchesAt);
+    const now = TimeService.safeNow(save.lastSeenTs);
+    return save.eggs.find(e => e.incubating && now < e.hatchesAt);
   }
 
   /** 长按破壳仪式：连续触摸使倒计时清零 */

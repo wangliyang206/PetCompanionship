@@ -48,8 +48,18 @@ export enum EggSource {
 export enum MemoryEventType {
   Feeding = 'feeding',
   Playing = 'playing',
+  Pet = 'pet',
   ExploreReturn = 'explore_return',
   Milestone = 'milestone',
   Away = 'away',
   MissYou = 'missyou',
+}
+
+/** 蛋纹路类型（纯视觉，与稀有度无关） */
+export enum EggPattern {
+  Plain = 'plain',
+  Swirl = 'swirl',
+  Dots = 'dots',
+  Zigzag = 'zigzag',
+  Star = 'star',
 }

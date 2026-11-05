@@ -28,6 +28,7 @@ export const GameConfig = {
     BABY_HOURS: 36,                     // 幼崽→成体 1.5 天
     ADULT_HOURS: 96,                    // 成体→完全体 4 天
     COMPANIONSHIP_SPEEDUP_MAX: 0.25,    // 陪伴值最多缩短剩余时间 25%
+    COMPANIONSHIP_PER_PERCENT: 10,      // 每 10 点陪伴值 = 1% 加速
   },
 
   // ===== 探索 =====
@@ -35,6 +36,8 @@ export const GameConfig = {
     DURATION_MIN: 240,                  // 每轮最短 4 小时
     DURATION_MAX: 480,                  // 每轮最长 8 小时
     FOOD_RATE: 0.8,                     // 带回食物概率
+    FOOD_MIN: 1,                        // 带回食物下限
+    FOOD_MAX: 3,                        // 带回食物上限
     SEE_STORY_RATE: 1.0,                // 每次带回见闻（喂记忆系统）
     UNLOCK_STAGE: Stage.Adult,          // 成体解锁探索
   },
@@ -54,6 +57,24 @@ export const GameConfig = {
     TOUCH_EGG_REDUCE_MIN: 2,            // 摸蛋一次缩短 2 分钟
   },
 
+  // ===== 星尘（PRD 2.9，数值可调参）=====
+  STARDUST: {
+    INTERACT_EARN: 1,                   // 每次抚摸/喂食/逗玩 +1
+    INTERACT_DAILY_CAP: 20,             // 互动星尘每日上限（防刷）
+    MISSYOU_MULTIPLIER: 2,              // 今日想见你互动双倍
+    SPEEDUP_COST: 10,                   // 加速成长单价
+    SPEEDUP_MINUTES: 30,                // 每 10 星尘 -30 分钟
+    FOOD_COST: 5,                       // 兑换食物单价
+    FOOD_PER_EXCHANGE: 1,               // 5 星尘 = 1 食物
+    MILESTONE_FINAL: 30,                // 完全体达成奖励
+    MILESTONE_XI_COMPLETE: 100,         // 系集齐奖励
+  },
+
+  // ===== 记忆系统 =====
+  MEMORY: {
+    MAX_EVENTS: 50,                     // 记忆事件最多保留条数（FIFO 淘汰）
+  },
+
   // ===== 稀有度（破壳揭晓光效颜色）=====
   RARITY_FX: {
     Common: null as string | null,
@@ -69,8 +90,8 @@ export const GameConfig = {
 
   // ===== 存档 =====
   SAVE: {
-    CURRENT_VERSION: 1,                 // 存档版本号（结构变更时 +1 并写迁移）
-    KEY: 'PetCompanionship.SaveData',   // localStorage key
+    CURRENT_VERSION: 2,                 // 存档版本号（结构变更时 +1 并写迁移）
+    KEY: 'PetCompanionship.SaveData',   // sys.localStorage key
   },
 };
 

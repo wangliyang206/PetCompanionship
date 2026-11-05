@@ -1,12 +1,14 @@
 /**
  * 本地存档读写（JSON）
- * - 读写：sys.localStorage + JSON 序列化
+ * - 读写：sys.localStorage + JSON 序列化（Web/原生 JSB 环境统一走 cc sys 层）
  * - version 迁移骨架：当前版本与存档版本不一致时走迁移链
  * - 每次写操作后通知 Events.SaveDirty
  */
 
+import { sys } from 'cc';
 import { GameConfig } from './GameConfig';
-import { SaveData, createDefaultSave } from './SaveData';
+import { SaveData, ExploreState, createDefaultSave } from './SaveData';
+import { EggPattern } from './Enums';
 import { Events, EventName } from './Events';
 import { TimeService } from './TimeService';
 
@@ -25,15 +27,11 @@ export class GameSave {
   /** 读取存档（首次启动时调用）。失败或不存在时返回新存档 */
   static load(): SaveData {
     this._initialized = true;
-    // 尝试从浏览器 localStorage 读取（Cocos Creator Web 平台）
-    // 真机 Android 上 sys.localStorage 实际就是 WebView localStorage
     let raw: string | null = null;
     try {
-      if (typeof localStorage !== 'undefined') {
-        raw = localStorage.getItem(GameConfig.SAVE.KEY);
-      }
+      raw = sys.localStorage.getItem(GameConfig.SAVE.KEY);
     } catch (e) {
-      console.warn('[GameSave] localStorage 不可用:', e);
+      console.warn('[GameSave] sys.localStorage 不可用:', e);
     }
 
     if (!raw) {
@@ -60,12 +58,10 @@ export class GameSave {
   static flush(): void {
     if (!this._data || !this._dirty) return;
     try {
-      // 更新时间戳（下线时间）
-      this._data.lastSeenTs = TimeService.now();
+      // 更新时间戳（下线时间）；系统时间回拨时不倒退
+      this._data.lastSeenTs = TimeService.safeNow(this._data.lastSeenTs);
       const json = JSON.stringify(this._data);
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(GameConfig.SAVE.KEY, json);
-      }
+      sys.localStorage.setItem(GameConfig.SAVE.KEY, json);
       this._dirty = false;
       console.log('[GameSave] 存档已写入');
     } catch (err) {
@@ -82,9 +78,7 @@ export class GameSave {
   /** 手动删除存档（调试 / 重置） */
   static delete(): void {
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem(GameConfig.SAVE.KEY);
-      }
+      sys.localStorage.removeItem(GameConfig.SAVE.KEY);
     } catch { /* ignore */ }
     this._data = null;
     this._dirty = false;
@@ -103,9 +97,46 @@ export class GameSave {
       return save;
     }
     console.log('[GameSave] 存档迁移：', save.version, '→', targetVer);
-    // 未来有新版本时，在此处补迁移逻辑：
-    // if (save.version < 2) { save = migrate_v1_to_v2(save); }
+
+    if (save.version < 2) {
+      save = this.migrateV1toV2(save);
+    }
     save.version = targetVer;
+    return save;
+  }
+
+  /**
+   * v1 → v2：
+   * - collectionFlags 中 `explore_*` JSON 字符串项 → 独立 exploreStates 字段；
+   * - collectionFlags 恢复纯 boolean；
+   * - 旧蛋补 incubating=true（旧模型下蛋都在孵化中）与默认纹路；
+   * - 补 exploreStates 字段。
+   */
+  private static migrateV1toV2(save: SaveData): SaveData {
+    const legacyFlags = (save.collectionFlags ?? {}) as Record<string, unknown>;
+    const flags: Record<string, boolean> = {};
+    const exploreStates: Record<string, ExploreState> = save.exploreStates ?? {};
+
+    for (const key of Object.keys(legacyFlags)) {
+      const value = legacyFlags[key];
+      if (key.startsWith('explore_') && typeof value === 'string') {
+        try {
+          exploreStates[key.slice('explore_'.length)] = JSON.parse(value) as ExploreState;
+        } catch {
+          console.warn('[GameSave] 迁移跳过无法解析的探索状态:', key);
+        }
+      } else {
+        flags[key] = !!value;
+      }
+    }
+
+    save.collectionFlags = flags;
+    save.exploreStates = exploreStates;
+
+    for (const egg of save.eggs ?? []) {
+      if (egg.incubating === undefined) egg.incubating = true;
+      if (egg.pattern === undefined) egg.pattern = EggPattern.Plain;
+    }
     return save;
   }
 }

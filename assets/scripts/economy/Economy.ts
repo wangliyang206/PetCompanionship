@@ -20,9 +20,9 @@ export interface DailyResult {
 
 export class Economy {
 
-  /** 检查并发放每日奖励 + 3 天保底蛋 */
+  /** 检查并发放每日奖励 + 3 天保底蛋（孵化位满则蛋入窝边队列，不丢失） */
   static tryDaily(save: SaveData): DailyResult {
-    const now = TimeService.now();
+    const now = TimeService.safeNow(save.lastSeenTs);
     const result: DailyResult = { foodGained: 0, pityEgg: false };
 
     if (TimeService.shouldTriggerDailyGift(save.dailyGiftTs)) {
@@ -33,13 +33,11 @@ export class Economy {
     }
 
     if (TimeService.isPityEggDue(save.eggPityTs, GameConfig.SUPPLY.EGG_PITY_DAYS)) {
-      if (EggSystem.canHatch(save)) {
-        const speciesId = EggSystem.rollSpecies(save);
-        EggSystem.createEgg(save, speciesId, EggSource.Daily);
-        save.eggPityTs = now;
-        result.pityEgg = true;
-        PetMemory.add(save, MemoryEventType.Milestone, 'pity_egg');
-      }
+      const speciesId = EggSystem.rollSpecies(save);
+      EggSystem.createEgg(save, speciesId, EggSource.Daily); // 位满自动排队
+      save.eggPityTs = now;
+      result.pityEgg = true;
+      PetMemory.add(save, MemoryEventType.Milestone, 'pity_egg');
     }
 
     return result;

@@ -7,7 +7,9 @@
 
 import { SaveData, PetState } from '../core/SaveData';
 import { Stage } from '../core/Enums';
+import { GameConfig } from '../core/GameConfig';
 import { PetDefs, getSpeciesByXi, ALL_SPECIES, getSpecies } from '../pet/PetDefs';
+import { ExploreSystem } from '../explore/ExploreSystem';
 import { Events, EventName } from '../core/Events';
 
 export class Collection {
@@ -24,10 +26,11 @@ export class Collection {
     });
   }
 
-  /** 切换主宠 */
+  /** 切换主宠（探索中的宠物不在小窝，不可切） */
   static switchActive(save: SaveData, petId: string): boolean {
     const pet = save.pets.find(p => p.id === petId);
     if (!pet) return false;
+    if (ExploreSystem.isExploring(save, petId)) return false;
     save.activePetId = petId;
     Events.emit(EventName.ActivePetSwitched, petId);
     return true;
@@ -58,11 +61,11 @@ export class Collection {
     return !!save.collectionFlags[`reward_xi_${xi}`];
   }
 
-  /** 发放系集齐奖励（标记 + 星尘奖励，具体数值待定） */
+  /** 发放系集齐奖励（标记 + 星尘奖励，数值见 GameConfig.STARDUST） */
   static grantXiReward(save: SaveData, xi: string): void {
     if (this.hasXiReward(save, xi)) return;
     save.collectionFlags[`reward_xi_${xi}`] = true;
-    const bonus = 50; // 暂定 50 星尘
+    const bonus = GameConfig.STARDUST.MILESTONE_XI_COMPLETE;
     save.stardust += bonus;
     Events.emit(EventName.StardustChanged, save.stardust);
     console.log('[Collection] 系集齐奖励已发放，xi=', xi, 'stardust=', bonus);

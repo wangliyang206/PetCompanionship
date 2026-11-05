@@ -1,8 +1,7 @@
 /**
  * 抚摸手势
  * - 手指在宠物身上划动触发
- * - 每次抚摸 +1 陪伴值 + 记录 MemoryEventType.Away 的反面——这里用 Pet 类型（但枚举里没有 Pet，用 Feeding 不合适）
- * - 简化：抚摸记录一条 away memory？不——先记录 Feeding 吧，后面有 Pet 类型再换
+ * - 每次抚摸 +1 陪伴值 + 记录 MemoryEventType.Pet（抚摸专属，不污染喂食记忆）
  *
  * 离线时间较长时第一次抚摸有"你终于理我了"的反馈
  */
@@ -19,8 +18,8 @@ export class TouchPet {
   static perform(save: SaveData, pet: PetState): number {
     const delta = GameConfig.INTERACT.TOUCH_COMPANIONSHIP;
     pet.companionship += delta;
-    pet.lastInteractTs = TimeService.now();
-    PetMemory.add(save, MemoryEventType.Feeding); // 简化：抚摸也写入 memory
+    pet.lastInteractTs = TimeService.safeNow(save.lastSeenTs);
+    PetMemory.add(save, MemoryEventType.Pet);
     Events.emit(EventName.PetInteracted, pet.id, 'pet');
     return delta;
   }

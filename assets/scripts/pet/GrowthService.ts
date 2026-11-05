@@ -27,13 +27,13 @@ export class GrowthService {
 
   /** 计算陪伴值加速比例（0~MAX） */
   private static speedupRatio(pet: PetState): number {
-    // 陪伴值每 10 点 = 1% 加速，封顶 MAX
-    const ratio = Math.min(GameConfig.GROWTH.COMPANIONSHIP_SPEEDUP_MAX, pet.companionship / 1000);
-    return ratio;
+    // 每 COMPANIONSHIP_PER_PERCENT 点陪伴值 = 1% 加速，封顶 MAX
+    const perPoint = GameConfig.GROWTH.COMPANIONSHIP_PER_PERCENT * 100;
+    return Math.min(GameConfig.GROWTH.COMPANIONSHIP_SPEEDUP_MAX, pet.companionship / perPoint);
   }
 
-  /** 阶段还剩多少毫秒才可以推进 */
-  static remainingMs(pet: PetState): number {
+  /** 阶段还剩多少毫秒才可以推进（now 传 safeNow 结果） */
+  static remainingMs(pet: PetState, now: number = TimeService.now()): number {
     if (pet.stage === Stage.Final) return 0;
     const baseHours = this.baseDurationHours(pet.stage);
     if (baseHours <= 0) return 0;
@@ -41,14 +41,14 @@ export class GrowthService {
     const totalMs = baseHours * 3600_000;
     const speedup = this.speedupRatio(pet);
     const effectiveMs = totalMs * (1 - speedup); // 陪伴值加速后总时长
-    const elapsed = TimeService.now() - pet.stageEnteredTs;
+    const elapsed = now - pet.stageEnteredTs;
     return Math.max(0, effectiveMs - elapsed);
   }
 
   /** 结算宠物成长（可能推进阶段） */
   static settlePet(save: SaveData, pet: PetState): void {
     if (pet.stage === Stage.Final) return;
-    const remaining = this.remainingMs(pet);
+    const remaining = this.remainingMs(pet, TimeService.safeNow(save.lastSeenTs));
     if (remaining <= 0) {
       this.advanceStage(save, pet);
       // 继续推进（可能一步到位进 Final）
@@ -62,7 +62,7 @@ export class GrowthService {
     if (!next) return;
     const oldStage = pet.stage;
     pet.stage = next;
-    pet.stageEnteredTs = TimeService.now();
+    pet.stageEnteredTs = TimeService.safeNow(save.lastSeenTs);
     pet.companionship = 0; // 陪伴值清零，新的阶段开始积累
 
     PetMemory.add(save, MemoryEventType.Milestone, `stage:${oldStage}->${next}`);

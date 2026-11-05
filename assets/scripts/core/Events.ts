@@ -61,6 +61,7 @@ export const EventName = {
   EggAdded: 'egg:added',
   EggHatched: 'egg:hatched',                 // 孵化倒计时到点
   EggBrokenShell: 'egg:broken_shell',        // 长按破壳
+  EggIncubationStarted: 'egg:incubation_started', // 排队蛋入孵（孵化位空出）
 
   // 探索
   ExploreDispatched: 'explore:dispatched',
