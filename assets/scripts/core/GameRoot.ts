@@ -33,6 +33,9 @@ export class GameRoot {
 
     // 通知与桌面组件（内部按存档重排，可重复调用）
     NotifierBridge.attach(save);
+    if (NotifierBridge.nativeAvailable && !NotifierBridge.hasPermission()) {
+      NotifierBridge.requestPermission();
+    }
     WidgetBridge.attach(save);
 
     GameSave.markDirty();
