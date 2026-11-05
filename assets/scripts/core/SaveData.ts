@@ -18,7 +18,7 @@ export interface SaveData {
   pets: PetState[];                      // 全部已孵化宠物
   activePetId: string;                   // 当前主宠（同一时间只有主宠在场）
   memory: MemoryEvent[];                 // 记忆系统关键事件
-  collectionFlags: Record<string, boolean>; // 图鉴/奖励/版图解锁标记
+  collectionFlags: Record<string, unknown>; // 图鉴/奖励/版图解锁标记 + 探索状态等杂项
   notificationPrefs: NotificationPrefs;  // 通知偏好
 }
 

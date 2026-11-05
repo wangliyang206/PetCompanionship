@@ -1,0 +1,128 @@
+/**
+ * 行为化状态机（无数值条）
+ * 输入（离线时长 / 最近事件 / 当日互动量）→ 行为标签（Happy/Calm/Sad/Expect）
+ * 同时负责台词选取（按事件优先级）
+ *
+ * 设计铁律：永远可修复无惩罚，离线仅表达 Sad。
+ */
+
+import { SaveData } from '../core/SaveData';
+import { PetState } from '../core/SaveData';
+import { Behavior } from '../core/Enums';
+import { TimeService } from '../core/TimeService';
+import { PetMemory } from './PetMemory';
+import { PetDefs, getSpecies } from './PetDefs';
+
+/** 行为状态机输入 */
+export interface BehaviorInput {
+  offlineHours: number;       // 离线时长（小时）
+  todayInteractions: number;  // 当日互动数（抚摸+喂食+逗玩）
+  recentFeedHours: number;    // 最近一次喂食距现在（小时，0 表示刚喂）
+  recentPlayHours: number;    // 最近一次玩耍距现在（小时）
+}
+
+export class PetBehavior {
+
+  /** 根据存档 + 宠物状态计算输入 */
+  static computeInput(save: SaveData, pet: PetState): BehaviorInput {
+    const offlineHours = TimeService.offlineHoursSince(save.lastSeenTs);
+    const todayStart = TimeService.todayMidnight();
+    const todayFeed = PetMemory.feedCountSince(save, TimeService.msUntilNextDay() / 3600_000 + 1);
+    const todayPlay = PetMemory.playCountSince(save, TimeService.msUntilNextDay() / 3600_000 + 1);
+    const todayInteractions = todayFeed + todayPlay +
+      // 简化：MemoryEventType.Pet 目前还没写入，先估 companionship 增量
+      Math.max(0, Math.floor(pet.companionship / 3));
+
+    // 最近一次喂食 / 玩耍距现在几小时
+    const now = TimeService.now();
+    const findHoursAgo = (type: string): number => {
+      for (let i = save.memory.length - 1; i >= 0; i--) {
+        if (save.memory[i].type === type) {
+          return Math.max(0, (now - save.memory[i].ts) / 3600_000);
+        }
+      }
+      return 999; // 从未发生过
+    };
+
+    return {
+      offlineHours,
+      todayInteractions,
+      recentFeedHours: findHoursAgo('feeding'),
+      recentPlayHours: findHoursAgo('playing'),
+    };
+  }
+
+  /** 主判定：输入 → 行为标签 */
+  static evaluate(input: BehaviorInput): Behavior {
+    // 规则优先级（从上到下命中即返回）：
+
+    // 1. 离线 > 24h → Sad（低负罪感，只是表达）
+    if (input.offlineHours > 24) return Behavior.Sad;
+
+    // 2. 刚互动过（今日互动 > 5 且最近 1h 内有喂食或玩耍）→ Happy
+    if (input.todayInteractions > 5 && (input.recentFeedHours < 1 || input.recentPlayHours < 1)) {
+      return Behavior.Happy;
+    }
+
+    // 3. 离线中等（2h~12h）→ Expect（抬头看门口等你）
+    if (input.offlineHours >= 2 && input.offlineHours <= 12) {
+      return Behavior.Expect;
+    }
+
+    // 4. 今日完全没互动、离线也不长 → Calm（安静蹲着）
+    if (input.todayInteractions === 0 && input.offlineHours < 1) {
+      return Behavior.Calm;
+    }
+
+    // 5. 今天互动很少（0~2 次）→ 轻度 Sad
+    if (input.todayInteractions < 3) return Behavior.Sad;
+
+    // 6. 默认 Calm
+    return Behavior.Calm;
+  }
+
+  /** 宠物见到玩家回来时选一句"见面台词"（按事件优先级） */
+  static pickGreetingLine(save: SaveData, pet: PetState): string {
+    const species = getSpecies(pet.speciesId);
+    if (!species) return '……';
+    const input = this.computeInput(save, pet);
+
+    // 优先级：离线时长 > 今日有没有互动 > 默认平静
+    if (input.offlineHours > 24) {
+      const arr = species.lines.away;
+      return this.pickRandom(arr);
+    }
+    if (input.todayInteractions < 3 && input.offlineHours > 1) {
+      const arr = species.lines.sad;
+      return this.pickRandom(arr);
+    }
+    if (input.recentFeedHours < 0.5 || input.recentPlayHours < 0.5) {
+      const arr = species.lines.happy;
+      return this.pickRandom(arr);
+    }
+    // 默认：随便一句 away 或 happy
+    return this.pickRandom([...species.lines.happy, ...species.lines.away]);
+  }
+
+  /** 选一句互动反馈台词（按互动类型） */
+  static pickInteractLine(
+    save: SaveData, pet: PetState, type: 'feed' | 'pet' | 'play',
+  ): string {
+    const species = getSpecies(pet.speciesId);
+    if (!species) return '~';
+
+    switch (type) {
+      case 'feed': return this.pickRandom(species.lines.feed);
+      case 'pet': return this.pickRandom(species.lines.pet);
+      case 'play': return this.pickRandom(species.lines.happy);
+    }
+  }
+
+  private static pickRandom(arr: string[]): string {
+    if (!arr || arr.length === 0) return '……';
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+}
+
+// void import 避免未使用警告
+void PetDefs;
