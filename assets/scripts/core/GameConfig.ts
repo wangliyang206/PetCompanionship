@@ -86,6 +86,12 @@ export const GameConfig = {
   // ===== 通知 =====
   NOTIFY: {
     MISSYOU_DAILY: true,                // 每日 1 条轮换通知，用户可关
+    MISSYOU_HOUR: 19,                    // 每日"今日想见你"提醒时刻（本地 24 小时制）
+    ID_HATCH: 1001,                      // 孵化完成通知 id（单孵化位，固定）
+    ID_EXPLORE: 1002,                    // 探索归来通知 id 基址（按 petId 散列偏移）
+    ID_FINAL: 1003,                      // 完全体达成通知 id
+    ID_MISSYOU: 1004,                    // 今日想见你通知 id
+    CHANNEL_ID: 'pet_events',            // Android 通知渠道 id
   },
 
   // ===== 存档 =====

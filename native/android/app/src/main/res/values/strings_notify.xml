@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pet_notify_channel_name">小窝消息</string>
+    <string name="pet_notify_channel_desc">孵化、探索归来和小窝里的动静</string>
+    <string name="pet_notify_default_title">小窝里的消息</string>
+    <string name="pet_widget_default_name">小窝</string>
+    <string name="pet_widget_default_status">等你回来</string>
+    <string name="pet_widget_thumb_desc">宠物头像</string>
+    <string name="pet_widget_desc">小窝里的宠物状态</string>
+</resources>

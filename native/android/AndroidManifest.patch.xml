@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AndroidManifest merge fragment (T17/T18).
+  Do NOT build this file directly: tools/inject-android.js injects it into the
+  generated project manifest (build/android/proj/app/src/main/AndroidManifest.xml)
+  after a Creator Android build.
+-->
+<pet-bridge-patch>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application-fragment>
+        <receiver
+            android:name="com.petcomp.game.notify.NotificationAlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name="com.petcomp.game.notify.NotificationBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="com.petcomp.game.widget.PetWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/pet_widget_info" />
+        </receiver>
+    </application-fragment>
+</pet-bridge-patch>
