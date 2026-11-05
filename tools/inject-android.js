@@ -3,11 +3,15 @@
  *
  * 用法（Creator 首次 Android 构建成功之后执行）：
  *   node tools/inject-android.js
- * 可选指定构建目录：
- *   node tools/inject-android.js build/android/proj
+ * 可选指定原生工程目录：
+ *   node tools/inject-android.js native/engine/android
+ *
+ * 目标目录为 Creator 生成的原生工程 native/engine/android
+ * （Gradle 中 app 模块的 projectDir，Java 在 app/src，res 在 app/res，
+ *   清单为 app/AndroidManifest.xml）。
  *
  * 做三件事（全部幂等，重复执行不会重复插入）：
- *   1. 复制 native/android 下的 Java 源码与 res 资源到生成的 Gradle 工程；
+ *   1. 复制 native/android 下的 Java 源码与 res 资源到原生工程；
  *   2. 在 AndroidManifest.xml 注入通知/小组件所需的权限与 receiver；
  *   3. 在 AppActivity.onCreate 注入原生桥初始化。
  */
@@ -26,10 +30,10 @@ function log(msg) { console.log('[inject-android] ' + msg); }
 function findProjectDir(argv) {
   const candidates = argv[2]
     ? [argv[2]]
-    : ['build/android/proj', 'build/android', 'build/android/project'];
+    : ['native/engine/android', 'build/android/proj', 'build/android'];
   for (const rel of candidates) {
     const dir = path.isAbsolute(rel) ? rel : path.join(ROOT, rel);
-    if (fs.existsSync(path.join(dir, 'app', 'src', 'main', 'AndroidManifest.xml'))) {
+    if (fs.existsSync(path.join(dir, 'app', 'AndroidManifest.xml'))) {
       return dir;
     }
   }
@@ -55,7 +59,7 @@ function copyTree(from, to) {
 }
 
 function patchManifest(projDir) {
-  const manifestPath = path.join(projDir, 'app', 'src', 'main', 'AndroidManifest.xml');
+  const manifestPath = path.join(projDir, 'app', 'AndroidManifest.xml');
   let xml = fs.readFileSync(manifestPath, 'utf8');
   if (xml.includes(MARK_BEGIN)) {
     log('AndroidManifest 已注入，跳过');
@@ -84,9 +88,9 @@ function patchManifest(projDir) {
 }
 
 function patchAppActivity(projDir) {
-  const javaRoot = path.join(projDir, 'app', 'src', 'main', 'java');
+  const javaRoot = path.join(projDir, 'app', 'src');
   if (!fs.existsSync(javaRoot)) {
-    log('未找到 app/src/main/java，跳过 AppActivity 注入');
+    log('未找到 app/src，跳过 AppActivity 注入');
     return;
   }
 
@@ -148,20 +152,20 @@ function findFile(dir, fileName) {
 function main() {
   const projDir = findProjectDir(process.argv);
   if (!projDir) {
-    console.error('[inject-android] 未找到 Android 构建产物。');
+    console.error('[inject-android] 未找到原生工程。');
     console.error('  请先在 Creator 中执行「项目 → 构建发布 → Android」一次，');
-    console.error('  确认 build/android/proj/app/src/main/AndroidManifest.xml 存在后重试。');
+    console.error('  确认 native/engine/android/app/AndroidManifest.xml 存在后重试。');
     process.exit(1);
   }
   log('目标工程：' + projDir);
 
   const javaCopied = copyTree(
     path.join(SRC, 'app', 'src', 'main', 'java'),
-    path.join(projDir, 'app', 'src', 'main', 'java'),
+    path.join(projDir, 'app', 'src'),
   );
   const resCopied = copyTree(
     path.join(SRC, 'app', 'src', 'main', 'res'),
-    path.join(projDir, 'app', 'src', 'main', 'res'),
+    path.join(projDir, 'app', 'res'),
   );
   log('Java 文件 ' + javaCopied + ' 个，资源文件 ' + resCopied + ' 个');
 

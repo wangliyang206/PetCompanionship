@@ -8,3 +8,4 @@ node_modules/
 profiles/
 .creator/
 .workbuddy/
+native/engine/

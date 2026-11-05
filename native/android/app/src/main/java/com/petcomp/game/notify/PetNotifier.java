@@ -31,7 +31,7 @@ public final class PetNotifier {
         return id == 0 ? fallback : context.getString(id);
     }
 
-    static int drawableId(Context context, String name) {
+    public static int drawableId(Context context, String name) {
         if (context == null) {
             return 0;
         }
