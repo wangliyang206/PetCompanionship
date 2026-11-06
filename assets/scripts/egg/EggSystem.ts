@@ -113,11 +113,12 @@ export class EggSystem {
     if (idx >= 0) save.eggs.splice(idx, 1);
     this.promoteQueuedEggs(save);
 
-    // 判断是否重复（A 阶段判定基于 MVP 实装池）
+    // 重复判定：已拥有该物种 → 转星尘。
+    // 正常情况下 B 阶段只产未拥有物种；但排队中的蛋可能在入队后才被同物种抢先孵化，
+    // 这里以"破壳时是否已拥有"为准，避免图鉴里出现两只同物种（docs/06 D31）。
     const owned = save.pets.some(p => p.speciesId === speciesId);
-    const allOwned = MVP_SPECIES.every(s => save.pets.some(p => p.speciesId === s.id));
 
-    if (owned && allOwned) {
+    if (owned) {
       // A 阶段 → 重复转星尘
       const dust = GameConfig.ECON.DUPLICATE_TO_STARDUST;
       save.stardust += dust;

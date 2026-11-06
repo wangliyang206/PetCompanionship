@@ -58,6 +58,12 @@ const TARGET_HEIGHT: Record<Stage, number> = {
   [Stage.Final]: 1.3,
 };
 
+/** 拖动/落点临时反应类型（T22） */
+export type PetReaction =
+  | 'lift' | 'follow' | 'drop'
+  | 'satisfy' | 'excited' | 'play'
+  | 'sad' | 'celebrate';
+
 @ccclass('PetView')
 export class PetView extends Component {
 
@@ -65,6 +71,7 @@ export class PetView extends Component {
   private _loadKey = '';
   private _baseScale = new Vec3(1, 1, 1);
   private _baseY = 0;
+  private _themeColor: Color = new Color(217, 160, 102, 255);
   private _stage: Stage = Stage.Egg;
 
   onLoad(): void {
@@ -74,6 +81,7 @@ export class PetView extends Component {
     Events.on(EventName.EggAdded, this.onRefresh);
     Events.on(EventName.EggIncubationStarted, this.onRefresh);
     Events.on(EventName.EggBrokenShell, this.onRefresh);
+    Events.on(EventName.PetBehaviorChanged, this.onBehaviorChanged);
     this.scheduleOnce(this.onRefresh, 0);
   }
 
@@ -84,6 +92,7 @@ export class PetView extends Component {
     Events.off(EventName.EggAdded, this.onRefresh);
     Events.off(EventName.EggIncubationStarted, this.onRefresh);
     Events.off(EventName.EggBrokenShell, this.onRefresh);
+    Events.off(EventName.PetBehaviorChanged, this.onBehaviorChanged);
     this.clearModel();
   }
 
@@ -96,6 +105,15 @@ export class PetView extends Component {
   get showingEgg(): boolean {
     return this._stage === Stage.Egg;
   }
+
+  /** 行为标签变化 → 只换动画，不重载模型（T6） */
+  private onBehaviorChanged = (petId: unknown, behavior: unknown): void => {
+    const save = GameSave.data;
+    const pet = save ? Collection.getActivePet(save) : undefined;
+    if (!pet || pet.id !== petId) return;
+    if (this._stage === Stage.Egg) return;
+    this.playBehavior(behavior as Behavior);
+  };
 
   // ===== 刷新显示 =====
 
@@ -137,6 +155,7 @@ export class PetView extends Component {
   private loadModel(path: string, themeHex: string): void {
     const key = this.toMeshKey(path);
     this._loadKey = path;
+    Color.fromHEX(this._themeColor, themeHex);
     resources.load(key, Mesh, (err, mesh) => {
       if (this._loadKey !== path) return; // 期间已切换
       if (err || !mesh) {
@@ -206,6 +225,7 @@ export class PetView extends Component {
     }
     const fbMat = makePlainMaterial('#D9A066');
     if (fbMat) mr.material = fbMat;
+    Color.fromHEX(this._themeColor, '#D9A066');
     this._model = node;
     this._baseScale = new Vec3(s, s, s);
     this._baseY = 0;
@@ -252,7 +272,11 @@ export class PetView extends Component {
   private playBehavior(behavior: Behavior): void {
     const model = this._model;
     if (!model) return;
+    Tween.stopAllByTarget(model);
     const s = this._baseScale;
+    model.setScale(s);
+    model.setPosition(0, this._baseY, 0);
+    if (behavior !== Behavior.Sad) this.tint(model, this._themeColor);
     if (behavior === Behavior.Happy) {
       tween(model)
         .by(0.16, { position: new Vec3(0, 0.22, 0) })
@@ -264,9 +288,15 @@ export class PetView extends Component {
       return;
     }
     if (behavior === Behavior.Sad) {
-      model.setScale(s.x * 0.92, s.y * 0.92, s.z * 0.92);
-      model.setPosition(0, this._baseY - 0.06, 0);
-      this.tint(model, new Color(170, 170, 170, 255));
+      // 失落可视化（T16）：缩身 + 变灰 + 缓慢叹气起伏
+      model.setScale(s.x * 0.86, s.y * 0.86, s.z * 0.86);
+      this.tint(model, new Color(150, 150, 150, 255));
+      tween(model)
+        .to(1.8, { position: new Vec3(0, this._baseY - 0.12, 0) })
+        .to(1.8, { position: new Vec3(0, this._baseY - 0.05, 0) })
+        .union()
+        .repeatForever()
+        .start();
       return;
     }
     if (behavior === Behavior.Expect) {
@@ -286,6 +316,84 @@ export class PetView extends Component {
       .union()
       .repeatForever()
       .start();
+  }
+
+  // ===== 拖动/落点临时反应（T22）=====
+
+  /** 播放一段临时反应，结束后自动回到行为动画 */
+  playReaction(kind: PetReaction, duration: number = 0.9): void {
+    const model = this._model;
+    if (!model) return;
+    Tween.stopAllByTarget(model);
+    model.setScale(this._baseScale);
+    model.setPosition(0, this._baseY, 0);
+    model.setRotationFromEuler(0, 0, 0);
+    this.tint(model, this._themeColor);
+    const s = this._baseScale;
+    let hold = duration;
+
+    switch (kind) {
+      case 'lift':
+        tween(model)
+          .to(0.12, { scale: new Vec3(s.x * 1.1, s.y * 1.06, s.z * 1.1), eulerAngles: new Vec3(0, 0, 6) })
+          .start();
+        break;
+      case 'follow':
+        tween(model)
+          .to(0.20, { eulerAngles: new Vec3(0, 0, 5) })
+          .to(0.20, { eulerAngles: new Vec3(0, 0, -5) })
+          .union()
+          .repeatForever()
+          .start();
+        break;
+      case 'drop':
+        tween(model)
+          .to(0.10, { scale: new Vec3(s.x * 1.18, s.y * 0.78, s.z * 1.18) })
+          .to(0.16, { scale: new Vec3(s.x * 0.94, s.y * 1.08, s.z * 0.94) })
+          .to(0.14, { scale: s.clone() })
+          .start();
+        break;
+      case 'satisfy':
+        tween(model)
+          .to(0.5, { scale: new Vec3(s.x * 0.9, s.y * 0.92, s.z * 0.9), eulerAngles: new Vec3(0, 0, -12) })
+          .to(0.8, { scale: s.clone(), eulerAngles: new Vec3(0, 0, 0) })
+          .start();
+        break;
+      case 'excited':
+        tween(model)
+          .by(0.12, { position: new Vec3(0, 0.26, 0) })
+          .by(0.12, { position: new Vec3(0, -0.26, 0) })
+          .by(0.12, { position: new Vec3(0, 0.26, 0) })
+          .by(0.12, { position: new Vec3(0, -0.26, 0) })
+          .start();
+        break;
+      case 'play':
+        tween(model)
+          .to(0.16, { eulerAngles: new Vec3(0, 0, 22) })
+          .to(0.16, { eulerAngles: new Vec3(0, 0, -22) })
+          .to(0.16, { eulerAngles: new Vec3(0, 0, 22) })
+          .to(0.16, { eulerAngles: new Vec3(0, 0, 0) })
+          .start();
+        break;
+      case 'sad':
+        tween(model)
+          .to(0.3, { scale: new Vec3(s.x * 0.82, s.y * 0.82, s.z * 0.82), eulerAngles: new Vec3(0, 180, 0) })
+          .start();
+        hold = Math.max(hold, 1.4);
+        break;
+      case 'celebrate':
+        tween(model)
+          .by(0.16, { position: new Vec3(0, 0.5, 0) })
+          .by(0.16, { position: new Vec3(0, -0.5, 0) })
+          .to(0.3, { eulerAngles: new Vec3(0, 360, 0) })
+          .to(0.05, { eulerAngles: new Vec3(0, 0, 0) })
+          .start();
+        break;
+    }
+
+    this.scheduleOnce(() => {
+      if (this._model === model) this.applyBehavior();
+    }, hold);
   }
 
   /** 失落变灰（材质属性名不同版本有差异，失败不影响表现） */

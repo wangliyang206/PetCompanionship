@@ -9,9 +9,12 @@ const _DAY_MS = 24 * 60 * 60 * 1000;
 
 export class TimeService {
 
+  /** 调试用虚拟时间偏移（仅 ?dev=1 快进时短暂置位，正常游戏恒为 0） */
+  static debugOffsetMs = 0;
+
   /** 当前时间戳（ms）——统一入口，便于测试时 mock */
   static now(): number {
-    return Date.now();
+    return Date.now() + this.debugOffsetMs;
   }
 
   /**

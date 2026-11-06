@@ -10,6 +10,8 @@ import { SaveData } from '../core/SaveData';
 import { PetState } from '../core/SaveData';
 import { Behavior } from '../core/Enums';
 import { TimeService } from '../core/TimeService';
+import { GameSave } from '../core/GameSave';
+import { Events, EventName } from '../core/Events';
 import { PetMemory } from './PetMemory';
 import { PetDefs, getSpecies } from './PetDefs';
 
@@ -23,10 +25,15 @@ export interface BehaviorInput {
 
 export class PetBehavior {
 
+  /** 上次广播的行为（按 petId 记录，用于只在变化时发事件） */
+  private static _last: Record<string, Behavior> = {};
+
   /** 根据存档 + 宠物状态计算输入 */
   static computeInput(save: SaveData, pet: PetState): BehaviorInput {
     const now = TimeService.safeNow(save.lastSeenTs);
-    const offlineHours = TimeService.offlineMsSince(save.lastSeenTs) / 3600_000;
+    // 离线时长必须用"本次启动快照"：lastSeenTs 会被 30s 自动落盘刷新（D25）
+    const sessionStart = GameSave.sessionStartTs > 0 ? GameSave.sessionStartTs : save.lastSeenTs;
+    const offlineHours = Math.max(0, now - sessionStart) / 3600_000;
 
     // "今日" = 自然日：回看至今天零点
     const hoursSinceMidnight = Math.max(0, (now - TimeService.todayMidnight()) / 3600_000);
@@ -57,8 +64,8 @@ export class PetBehavior {
   static evaluate(input: BehaviorInput): Behavior {
     // 规则优先级（从上到下命中即返回）：
 
-    // 1. 离线 > 24h → Sad（低负罪感，只是表达）
-    if (input.offlineHours > 24) return Behavior.Sad;
+    // 1. 离线 > 24h 且还没被重新照顾 → Sad（互动 3 次后自动回暖，永远可修复）
+    if (input.offlineHours > 24 && input.todayInteractions < 3) return Behavior.Sad;
 
     // 2. 刚互动过（今日互动 > 5 且最近 1h 内有喂食或玩耍）→ Happy
     if (input.todayInteractions > 5 && (input.recentFeedHours < 1 || input.recentPlayHours < 1)) {
@@ -75,11 +82,29 @@ export class PetBehavior {
       return Behavior.Calm;
     }
 
-    // 5. 今天互动很少（0~2 次）→ 轻度 Sad
-    if (input.todayInteractions < 3) return Behavior.Sad;
+    // 5. 今天互动很少（1~2 次）且离开了一会儿 → 轻度 Sad
+    if (input.todayInteractions < 3 && input.offlineHours > 1) return Behavior.Sad;
 
     // 6. 默认 Calm
     return Behavior.Calm;
+  }
+
+  /**
+   * 重新评估并广播行为变化（GameUI 每 30 秒调用一次）。
+   * 只在标签变化时发 PetBehaviorChanged，避免重复打断动画。
+   */
+  static refresh(save: SaveData, pet: PetState): Behavior {
+    const behavior = this.evaluate(this.computeInput(save, pet));
+    if (this._last[pet.id] !== behavior) {
+      this._last[pet.id] = behavior;
+      Events.emit(EventName.PetBehaviorChanged, pet.id, behavior);
+    }
+    return behavior;
+  }
+
+  /** 当前缓存的行为标签（未评估过返回 Calm） */
+  static current(petId: string): Behavior {
+    return this._last[petId] ?? Behavior.Calm;
   }
 
   /** 宠物见到玩家回来时选一句"见面台词"（按事件优先级） */
@@ -117,6 +142,23 @@ export class PetBehavior {
       case 'pet': return this.pickRandom(species.lines.pet);
       case 'play': return this.pickRandom(species.lines.happy);
     }
+  }
+
+  /** 行为标签 → 空闲台词（Sad 用 away 的"你去哪儿了呀"，Expect 用迎门句） */
+  static pickIdleLine(save: SaveData, pet: PetState, behavior: Behavior): string {
+    const species = getSpecies(pet.speciesId);
+    if (!species) return '……';
+    switch (behavior) {
+      case Behavior.Sad: return this.pickRandom(species.lines.away);
+      case Behavior.Expect: return this.pickRandom([...species.lines.away, ...species.lines.happy]);
+      case Behavior.Happy: return this.pickRandom(species.lines.happy);
+      default: return this.pickRandom(species.lines.pet);
+    }
+  }
+
+  /** 清空行为缓存（切主宠 / 重开时用） */
+  static reset(): void {
+    this._last = {};
   }
 
   private static pickRandom(arr: string[]): string {

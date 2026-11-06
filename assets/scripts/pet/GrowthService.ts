@@ -78,10 +78,36 @@ export class GrowthService {
     }
   }
 
+  /** 当前阶段完成比例（0~1，完全体=1；蛋阶段由孵化界面单独展示） */
+  static stageProgress(save: SaveData, pet: PetState): number {
+    if (pet.stage === Stage.Final) return 1;
+    const baseHours = this.baseDurationHours(pet.stage);
+    if (baseHours <= 0) return 0;
+    const totalMs = baseHours * 3600_000 * (1 - this.speedupRatio(pet));
+    if (totalMs <= 0) return 1;
+    const now = TimeService.safeNow(save.lastSeenTs);
+    return Math.min(1, Math.max(0, (now - pet.stageEnteredTs) / totalMs));
+  }
+
   /** 离线后统一结算所有宠物 */
   static settleAllPets(save: SaveData): void {
     for (const pet of save.pets) {
       this.settlePet(save, pet);
     }
+  }
+
+  /**
+   * 调试快进成长（?dev=1 专用）
+   * 把目标宠物的 stageEnteredTs 前移指定小时数，再走正常结算推进阶段。
+   */
+  static debugAdvance(save: SaveData, hours: number, petId?: string): void {
+    const now = TimeService.safeNow(save.lastSeenTs);
+    const delta = hours * 3600_000;
+    for (const pet of save.pets) {
+      if (petId && pet.id !== petId) continue;
+      if (pet.stage === Stage.Egg) continue;
+      pet.stageEnteredTs = Math.min(pet.stageEnteredTs, now) - delta;
+    }
+    this.settleAllPets(save);
   }
 }

@@ -31,15 +31,58 @@ export const GameConfig = {
     COMPANIONSHIP_PER_PERCENT: 10,      // 每 10 点陪伴值 = 1% 加速
   },
 
-  // ===== 探索 =====
+  // ===== 探索（PRD 2.8.1 / 2.8.2：拖到门口派出，两档时长，可召回）=====
   EXPLORE: {
-    DURATION_MIN: 240,                  // 每轮最短 4 小时
-    DURATION_MAX: 480,                  // 每轮最长 8 小时
-    FOOD_RATE: 0.8,                     // 带回食物概率
+    UNLOCK_STAGE: Stage.Adult,          // 成体解锁探索
+    DURATION_SHORT: 120,                // 短途 ~2 小时（收益减半档）
+    DURATION_LONG: 480,                 // 远征 ~8 小时（全额收益档）
+    TRIP_SHORT_MULT: 0.5,               // 短途收益倍率
+    FOOD_RATE: 0.8,                     // 带回食物概率（远征基准）
     FOOD_MIN: 1,                        // 带回食物下限
     FOOD_MAX: 3,                        // 带回食物上限
+    EGG_RATE: 0.4,                      // 带回虫卵概率（远征基准）
     SEE_STORY_RATE: 1.0,                // 每次带回见闻（喂记忆系统）
-    UNLOCK_STAGE: Stage.Adult,          // 成体解锁探索
+    RECALL_ALLOWED: true,               // 允许中途召回
+    RECALL_MIN_RATIO: 0.2,              // 召回时低于该外出比例视为空手（只带见闻）
+  },
+
+  // ===== 自主溜达（PRD 2.7.2）=====
+  WANDER: {
+    IDLE_MIN: 3.0,                      // 平静：停留秒数下限
+    IDLE_MAX: 7.0,                      // 平静：停留秒数上限
+    IDLE_HAPPY_MIN: 1.2,                // 开心：停留更短
+    IDLE_HAPPY_MAX: 2.4,
+    IDLE_SAD: 15.0,                     // 失落：长时间蹲角落
+    MOVE_MIN: 1.2,                      // 单段移动基础秒数
+    MOVE_MAX: 2.8,
+    MOVE_FAST_MULT: 0.55,               // 开心小跑倍率
+    MOVE_SLOW_MULT: 1.8,                // 平静踱步倍率
+    RESUME_DELAY: 2.5,                  // 被互动打断后恢复漫游的延迟（秒）
+    IDLE_CHANCE: 0.35,                  // 停留时主动说话的基准概率（性格会放大）
+  },
+
+  // ===== 拖动宠物（PRD 2.7.1）=====
+  DRAG: {
+    HOLD_MS: 300,                       // 按住超过该时长再移动 = 拖动宠物（否则算抚摸）
+    LIFT_Y: 0.28,                       // 拖起时离地高度（世界单位）
+    DROP_RADIUS: 110,                   // 落点判定半径（设计像素）
+    REBOUND_MS: 260,                    // 落地回弹时长
+    RETURN_SEC: 1.6,                    // 窝外角落自行踱回时长
+    WORLD_MIN_X: -2.4,
+    WORLD_MAX_X: 2.4,
+    WORLD_MIN_Z: -2.6,
+    WORLD_MAX_Z: 2.0,
+  },
+
+  // ===== 小窝锚点（运行时由 SceneSetup 创建空节点，纯移动/落点判定用）=====
+  SCENE: {
+    HOME: { x: 0.6, z: 0.8 },           // 与 Main.scene 的 PetAnchor 初始位置一致
+    DOORWAY: { x: 0.2, z: -2.4 },       // 门口 / 小背包锚点（拖到这里派出探索）
+    SLEEP_PAD: { x: -1.2, z: -1.0 },    // 软垫（与场景 Nest 重合）
+    FOOD_BOWL: { x: -1.8, z: 1.4 },     // 食盆
+    PLAY_PILE: { x: 1.8, z: 0.2 },      // 玩具堆
+    CORNER: { x: -2.2, z: -1.8 },       // 窝外角落（失落蹲这里）
+    WINDOW: { x: 2.2, z: -1.0 },        // 窗边
   },
 
   // ===== 经济 =====

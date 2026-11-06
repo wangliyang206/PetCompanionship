@@ -15,6 +15,7 @@ import { EggSystem } from '../egg/EggSystem';
 import { GrowthService } from '../pet/GrowthService';
 import { ExploreSystem } from '../explore/ExploreSystem';
 import { Economy } from '../economy/Economy';
+import { MissYouService } from './MissYouService';
 import { NotifierBridge } from '../notify/NotifierBridge';
 import { WidgetBridge } from '../widget/WidgetBridge';
 
@@ -56,6 +57,7 @@ export class GameRoot {
     GrowthService.settleAllPets(save);
     ExploreSystem.settleAll(save);
     Economy.tryDaily(save);
+    MissYouService.ensureDaily(save);
 
     GameSave.markDirty();
     this._save = save;
@@ -81,6 +83,7 @@ export class GameRoot {
     EggSystem.promoteQueuedEggs(save);
     GrowthService.settleAllPets(save);
     ExploreSystem.settleAll(save);
+    MissYouService.ensureDaily(save);
     WidgetBridge.refresh();
     GameSave.flush();
   }

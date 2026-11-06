@@ -10,6 +10,7 @@ import { TimeService } from '../core/TimeService';
 import { PetMemory } from '../pet/PetMemory';
 import { GameConfig } from '../core/GameConfig';
 import { Events, EventName } from '../core/Events';
+import { Economy } from '../economy/Economy';
 
 export class DragFeed {
 
@@ -22,6 +23,7 @@ export class DragFeed {
     pet.companionship += GameConfig.INTERACT.FEED_COMPANIONSHIP;
     pet.lastInteractTs = TimeService.safeNow(save.lastSeenTs);
     PetMemory.add(save, MemoryEventType.Feeding, foodName);
+    Economy.awardInteractStardust(save, pet);
     Events.emit(EventName.FoodChanged, save.food);
     Events.emit(EventName.PetInteracted, pet.id, 'feed');
     return true;

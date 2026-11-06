@@ -22,7 +22,11 @@ export interface ExploreResult {
   eggQueued: boolean;      // 带回的蛋是否进入窝边等待队列（false=直接入孵）
   speciesIdIfEgg: string;
   story: string;
+  recalled: boolean;       // 是否为中途召回（T12）
+  multiplier: number;      // 实际收益倍率（短途 0.5 / 按外出比例折算）
 }
+
+export type ExploreKind = 'short' | 'long';
 
 export class ExploreSystem {
 
@@ -32,11 +36,11 @@ export class ExploreSystem {
     return !this.isExploring(save, pet.id);
   }
 
-  /** 派出探索 */
-  static dispatch(save: SaveData, pet: PetState): ExploreState {
+  /** 派出探索：short ≈2h（收益减半），long ≈8h（全额） */
+  static dispatch(save: SaveData, pet: PetState, kind: ExploreKind = 'long'): ExploreState {
     const now = TimeService.safeNow(save.lastSeenTs);
-    const durationMin = GameConfig.EXPLORE.DURATION_MIN +
-      Math.floor(Math.random() * (GameConfig.EXPLORE.DURATION_MAX - GameConfig.EXPLORE.DURATION_MIN));
+    const cfg = GameConfig.EXPLORE;
+    const durationMin = kind === 'short' ? cfg.DURATION_SHORT : cfg.DURATION_LONG;
     const endTs = now + durationMin * 60_000;
 
     const state: ExploreState = { startTs: now, endTs, returned: false };
@@ -60,11 +64,39 @@ export class ExploreSystem {
     return !data.returned && TimeService.safeNow(save.lastSeenTs) < data.endTs;
   }
 
-  /** 探索归来结算（离线结算调用） */
-  static settleReturn(save: SaveData, pet: PetState): ExploreResult | null {
+  /** 当前是否有宠物在探索（UI 显示召回按钮用） */
+  static anyExploring(save: SaveData): boolean {
+    return save.pets.some(p => this.isExploring(save, p.id));
+  }
+
+  /** 所有在探索中的宠物（召回按钮 / 结算用） */
+  static exploringPets(save: SaveData): PetState[] {
+    return save.pets.filter(p => this.isExploring(save, p.id));
+  }
+
+  /**
+   * 中途召回（T12）：立即结算，按实际外出时长比例折算收益。
+   * 外出比例低于 RECALL_MIN_RATIO 时视为空手（只带见闻）。
+   */
+  static recall(save: SaveData, pet: PetState): ExploreResult | null {
+    if (!GameConfig.EXPLORE.RECALL_ALLOWED) return null;
     const data = save.exploreStates[pet.id];
     if (!data || data.returned) return null;
-    if (TimeService.safeNow(save.lastSeenTs) < data.endTs) return null; // 还没到时间
+    if (!this.isExploring(save, pet.id)) return null;
+    // 先记下原计划结束时间（折算比例要用），再把结束时间提前到现在
+    const plannedEndTs = data.endTs;
+    data.endTs = TimeService.safeNow(save.lastSeenTs);
+    return this.settleReturn(save, pet, true, plannedEndTs);
+  }
+
+  /** 探索归来结算（离线结算调用；plannedEndTs 仅召回时传原计划结束时间） */
+  static settleReturn(
+    save: SaveData, pet: PetState, recalled: boolean = false, plannedEndTs?: number,
+  ): ExploreResult | null {
+    const data = save.exploreStates[pet.id];
+    if (!data || data.returned) return null;
+    const now = TimeService.safeNow(save.lastSeenTs);
+    if (now < data.endTs) return null; // 还没到时间
 
     // 标记为已归来
     data.returned = true;
@@ -75,17 +107,28 @@ export class ExploreSystem {
       Events.emit(EventName.ActivePetSwitched, pet.id);
     }
 
-    // 随机掉落
     const cfg = GameConfig.EXPLORE;
-    const foodGained = Math.random() < cfg.FOOD_RATE
-      ? cfg.FOOD_MIN + Math.floor(Math.random() * (cfg.FOOD_MAX - cfg.FOOD_MIN + 1))
-      : 0;
+    // 收益倍率：实际外出比例 × 短途档倍率（T12 2.8.2）
+    const plannedEnd = plannedEndTs ?? data.endTs;
+    const plannedMs = Math.max(1, plannedEnd - data.startTs);
+    const elapsedMs = Math.max(0, now - data.startTs);
+    const ratio = Math.min(1, elapsedMs / plannedMs);
+    const isShort = plannedMs <= (cfg.DURATION_SHORT + cfg.DURATION_LONG) / 2 * 60_000;
+    const multiplier = ratio * (isShort ? cfg.TRIP_SHORT_MULT : 1);
+    const emptyHanded = recalled && ratio < cfg.RECALL_MIN_RATIO;
+
+    // 随机掉落（按倍率折算概率与数量）
+    const foodGained = emptyHanded ? 0
+      : (Math.random() < cfg.FOOD_RATE * multiplier
+        ? Math.max(1, Math.round(
+          (cfg.FOOD_MIN + Math.floor(Math.random() * (cfg.FOOD_MAX - cfg.FOOD_MIN + 1))) * multiplier))
+        : 0);
     save.food += foodGained;
 
     let eggGained = false;
     let eggQueued = false;
     let speciesIdIfEgg = '';
-    if (Math.random() < GameConfig.SUPPLY.EXPLORE_EGG_RATE) {
+    if (!emptyHanded && Math.random() < cfg.EGG_RATE * multiplier) {
       // 蛋掉落——孵化位有空直接入孵，位满则窝边排队等待
       speciesIdIfEgg = EggSystem.rollSpecies(save);
       const egg = EggSystem.createEgg(save, speciesIdIfEgg, EggSource.Explore);
@@ -94,10 +137,13 @@ export class ExploreSystem {
     }
 
     // 见闻（必得）
-    const story = this.randomStory();
+    const baseStory = this.randomStory();
+    const story = emptyHanded ? '刚出门就被叫回来了……这次什么也没带回来。' : baseStory;
     PetMemory.add(save, MemoryEventType.ExploreReturn, story);
 
-    const result: ExploreResult = { foodGained, eggGained, eggQueued, speciesIdIfEgg, story };
+    const result: ExploreResult = {
+      foodGained, eggGained, eggQueued, speciesIdIfEgg, story, recalled, multiplier,
+    };
     Events.emit(EventName.ExploreReturned, pet.id, result);
     Events.emit(EventName.FoodChanged, save.food);
     return result;

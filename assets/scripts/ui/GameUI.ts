@@ -14,7 +14,7 @@ import {
 import { GameConfig } from '../core/GameConfig';
 import { GameSave } from '../core/GameSave';
 import { EggSystem } from '../egg/EggSystem';
-import { EggSource, Stage, Rarity } from '../core/Enums';
+import { EggSource, Stage, Rarity, Behavior } from '../core/Enums';
 import { Events, EventName } from '../core/Events';
 import { Collection } from '../collection/Collection';
 import { Onboarding } from './Onboarding';
@@ -24,6 +24,12 @@ import { PetView } from '../pet/PetView';
 import { TouchPet } from '../interaction/TouchPet';
 import { DragFeed } from '../interaction/DragFeed';
 import { PokePlay } from '../interaction/PokePlay';
+import { DragPet } from '../interaction/DragPet';
+import { ExploreSystem, ExploreResult, ExploreKind } from '../explore/ExploreSystem';
+import { GrowthService } from '../pet/GrowthService';
+import { PetPersonality } from '../pet/PetPersonality';
+import { MissYouService } from '../core/MissYouService';
+import { DebugTools } from '../core/DebugTools';
 import { TimeService } from '../core/TimeService';
 import { getSpecies } from '../pet/PetDefs';
 import { UI, button, circle, label, panel, uiNode } from './UiFactory';
@@ -66,10 +72,23 @@ export class GameUI extends Component {
   private _dragDot: Node | null = null;
   private _onboard: Node | null = null;
   private _album: Node | null = null;
+  private _missYouPill: Node | null = null;
+  private _missYouLb: Label | null = null;
+  private _recallBtn: Node | null = null;
+  private _pawG: Graphics | null = null;
+  private _pawPill: Node | null = null;
+  private _exploreDlg: Node | null = null;
+  private _explorePetId = '';
+  private _devPanel: Node | null = null;
+  private _dragPet: DragPet | null = null;
+  private _dragMode = false;
 
   private _toastTimer = 0;
   private _bubbleTimer = 0;
   private _petScreen = { x: 0, y: 0 };
+  private _behaviorTimer = 0;
+  private _progressTimer = 0;
+  private _lastSadLineTs = 0;
 
   // 触摸状态
   private _target: '' | 'pet' | 'dish' | 'album' = '';
@@ -89,6 +108,7 @@ export class GameUI extends Component {
     const scene = director.getScene();
     this._cam = scene?.getChildByName('Main Camera')?.getComponent(Camera) ?? null;
     this._petView = scene?.getChildByName('PetAnchor')?.getComponent(PetView) ?? null;
+    this._dragPet = this._petView ? new DragPet(this._petView) : null;
 
     this.buildHud();
     this.bindEvents();
@@ -99,10 +119,12 @@ export class GameUI extends Component {
     input.on(Input.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
 
     this.refreshHud();
+    this.refreshMissYou();
     if (GameSave.data && Onboarding.isFirstLaunch(GameSave.data)) {
       this.showOnboarding();
     } else {
       this.showGreeting();
+      this.announceMissYou();
     }
   }
 
@@ -112,6 +134,14 @@ export class GameUI extends Component {
     input.off(Input.EventType.TOUCH_END, this.onTouchEnd, this);
     input.off(Input.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
     Events.off(EventName.DialogRequest, this.onDialogRequest);
+    Events.off(EventName.FoodChanged, this.onFoodChanged);
+    Events.off(EventName.StardustChanged, this.onDustChanged);
+    Events.off(EventName.PetInteracted, this.onInteracted);
+    Events.off(EventName.ActivePetSwitched, this.onSwitch);
+    Events.off(EventName.PetStageChanged, this.onStageChanged);
+    Events.off(EventName.ExploreReturned, this.onExploreReturned);
+    Events.off(EventName.MissYouToday, this.onMissYouToday);
+    Events.off(EventName.PetBehaviorChanged, this.onBehaviorChanged);
   }
 
   // ===== 生命周期 =====
@@ -123,6 +153,9 @@ export class GameUI extends Component {
     this.updateToast(dt);
     this.updateBubbleTimer(dt);
     this.updateHold();
+    this.updateBehavior(dt);
+    this.updateProgress(dt);
+    this.updateRecallBtn();
   }
 
   private updatePetScreen(): void {
@@ -220,7 +253,67 @@ export class GameUI extends Component {
     }
   }
 
-  // ===== 输入 =====
+  /** T6：每 30 秒重算行为；T16：切到 Sad 时补一句失落台词（节流） */
+  private updateBehavior(dt: number): void {
+    const save = GameSave.data;
+    if (!save) return;
+    const pet = Collection.getActivePet(save);
+    if (!pet) return;
+    this._behaviorTimer -= dt;
+    if (this._behaviorTimer > 0) return;
+    this._behaviorTimer = 30;
+    PetBehavior.refresh(save, pet);
+  }
+
+  /** T16：爪印陪伴进度（无数字），蛋期沿用孵化条 */
+  private updateProgress(dt: number): void {
+    if (!this._pawPill || !this._pawG) return;
+    this._progressTimer -= dt;
+    if (this._progressTimer > 0) return;
+    this._progressTimer = 0.4;
+
+    const save = GameSave.data;
+    const pet = save ? Collection.getActivePet(save) : undefined;
+    if (!save || !pet || pet.stage === Stage.Egg) {
+      this._pawPill.active = false;
+      return;
+    }
+    this._pawPill.active = true;
+    this.drawPaws(GrowthService.stageProgress(save, pet));
+  }
+
+  private drawPaws(ratio: number): void {
+    const g = this._pawG;
+    if (!g) return;
+    g.clear();
+    const n = 8;
+    const gap = 34;
+    const total = (n - 1) * gap;
+    for (let i = 0; i < n; i++) {
+      const x = -total / 2 + i * gap;
+      const lit = ratio * n >= i + 0.15;
+      this.drawOnePaw(g, x, 0, lit);
+    }
+  }
+
+  private drawOnePaw(g: Graphics, x: number, y: number, lit: boolean): void {
+    g.fillColor = lit ? UI.WARM : new Color(196, 184, 166, 255);
+    // 掌垫
+    g.circle(x, y - 4, 6.5);
+    g.fill();
+    // 三个脚趾
+    g.circle(x - 8, y + 5, 2.8);
+    g.circle(x, y + 8, 2.8);
+    g.circle(x + 8, y + 5, 2.8);
+    g.fill();
+  }
+
+  /** 有宠物在探索时显示召回按钮 */
+  private updateRecallBtn(): void {
+    if (!this._recallBtn) return;
+    const save = GameSave.data;
+    this._recallBtn.active = !!save && ExploreSystem.anyExploring(save);
+  }
 
   private toLocal(e: EventTouch): { x: number; y: number } {
     const p = e.getUILocation();
@@ -237,6 +330,10 @@ export class GameUI extends Component {
     this._pressTs = Date.now();
     this._target = '';
 
+    if (this._exploreDlg && this._exploreDlg.active) {
+      this.tapExploreDialog(x, y);
+      return;
+    }
     if (this._onboard && this._onboard.active) {
       this.tapOnboarding(x, y);
       return;
@@ -244,6 +341,23 @@ export class GameUI extends Component {
     if (this._album && this._album.active) {
       this.tapAlbum(x, y);
       return;
+    }
+
+    // 召回（有宠物在外时）
+    const recall = this.recallPos();
+    if (this._recallBtn && this._recallBtn.active &&
+        Math.abs(x - recall.x) <= 72 && Math.abs(y - recall.y) <= 32) {
+      this.recallExploring();
+      return;
+    }
+
+    // 调试面板（?dev=1）
+    if (this._devPanel && this._devPanel.active) {
+      const idx = this.hitDevButton(x, y);
+      if (idx >= 0) {
+        this.runDev(idx);
+        return;
+      }
     }
 
     const albumBtn = this.albumButtonPos();
@@ -271,9 +385,26 @@ export class GameUI extends Component {
     this._startX = x;
     this._startY = y;
 
-    if (this._target === 'pet' && this._moved > HIT.SWIPE) {
-      this.petSwipe();
+    // T22：拖动宠物（按住 ≥HOLD_MS 后移动）
+    if (this._dragMode) {
+      this._dragPet?.move(x, y);
       return;
+    }
+    if (this._target === 'pet') {
+      const total = this.movedSinceStart(x, y);
+      const held = Date.now() - this._pressTs;
+      if (total > 40 && held >= GameConfig.DRAG.HOLD_MS && this._dragPet) {
+        if (this._dragPet.begin(this._downX, this._downY)) {
+          this._dragMode = true;
+          this.hideDragDot();
+          this._dragPet.move(x, y);
+          return;
+        }
+      }
+      if (this._moved > HIT.SWIPE) {
+        this.petSwipe();
+        return;
+      }
     }
     if (this._target === 'dish') {
       this.moveDragDot(x, y);
@@ -282,6 +413,13 @@ export class GameUI extends Component {
 
   private onTouchEnd = (e: EventTouch): void => {
     const { x, y } = this.toLocal(e);
+    if (this._dragMode) {
+      this._dragMode = false;
+      this._target = '';
+      this.hideDragDot();
+      this.finishPetDrag(x, y);
+      return;
+    }
     const target = this._target;
     this._target = '';
     this.hideDragDot();
@@ -319,6 +457,188 @@ export class GameUI extends Component {
     return !!PokePlay.getIncubatingEgg(save);
   }
 
+  // ===== 拖动宠物 / 探索派出（T22 / T12）=====
+
+  private finishPetDrag(x: number, y: number): void {
+    const drag = this._dragPet;
+    if (!drag) return;
+    const target = drag.end(x, y);
+    const save = GameSave.data;
+    const pet = save ? Collection.getActivePet(save) : undefined;
+
+    // 窝外（没有落点）或窝外角落：委屈回望后自行踱回，不惩罚
+    if (!target || target === 'Corner') {
+      this._petView?.playReaction('sad', 1.6);
+      this.say('……（委屈地看了你一眼，自己踱回小窝）');
+      drag.walkHome();
+      return;
+    }
+
+    // 门口：进入探索派发
+    if (target === 'Doorway') {
+      if (save && pet && ExploreSystem.canDispatch(save, pet)) {
+        drag.resumeWander(1.0);
+        this.openExploreDialog(pet);
+      } else if (pet && (pet.stage === Stage.Adult || pet.stage === Stage.Final)) {
+        this.showToast('它已经在外面了');
+        drag.walkHome();
+      } else {
+        this.showToast('长大一点才可以出门探险');
+        drag.walkHome();
+      }
+      return;
+    }
+
+    switch (target) {
+      case 'SleepPad':
+        this._petView?.playReaction('satisfy', 1.2);
+        this.say('软软的垫子，舒服得蜷成一团');
+        break;
+      case 'FoodBowl':
+        this._petView?.playReaction('excited', 1.0);
+        this.say('食物！是你给我留的吗？');
+        break;
+      case 'PlayPile':
+        this._petView?.playReaction('play', 1.0);
+        this.say('这个玩具是我的啦');
+        break;
+      case 'Window':
+        this._petView?.playReaction('satisfy', 1.0);
+        this.say('窗边晒太阳最舒服了');
+        break;
+    }
+    drag.resumeWander(1.4);
+  }
+
+  private openExploreDialog(pet: import('../core/SaveData').PetState): void {
+    if (this._exploreDlg) return;
+    const w = this._w;
+    const h = this._h;
+    const root = uiNode('ExploreDialog', w, h);
+    root.setParent(this.node);
+    root.setPosition(0, 0, 0);
+    this._exploreDlg = root;
+    this._explorePetId = pet.id;
+
+    const mask = panel('Mask', w, h, UI.MASK, 0);
+    mask.setParent(root);
+
+    const bg = panel('Bg', 540, 470, UI.BG_SOLID, 24);
+    bg.setParent(root);
+    bg.setPosition(0, 0);
+
+    const title = label('Title', '要出门探险吗？', 28, UI.TEXT, 460, 44);
+    title.setParent(bg);
+    title.setPosition(0, 176);
+
+    const sub = label('Sub', '它会在外面待一阵子，回来也许带些东西', 17, UI.TEXT_LIGHT, 460, 30);
+    sub.setParent(bg);
+    sub.setPosition(0, 138);
+
+    const shortBtn = button('ShortBtn', '短途 · 约 2 小时', 400, 64, UI.CARD, UI.TEXT, 22);
+    shortBtn.setParent(bg);
+    shortBtn.setPosition(0, 50);
+
+    const longBtn = button('LongBtn', '远征 · 约 8 小时', 400, 64, UI.WARM, new Color(255, 255, 255, 255), 22);
+    longBtn.setParent(bg);
+    longBtn.setPosition(0, -36);
+
+    const cancel = label('Cancel', '先不去了', 18, UI.TEXT_LIGHT, 300, 40);
+    cancel.setParent(bg);
+    cancel.setPosition(0, -140);
+  }
+
+  private tapExploreDialog(x: number, y: number): void {
+    if (!this._exploreDlg) return;
+    if (Math.abs(x) <= 220 && Math.abs(y - 50) <= 34) {
+      this.dispatchExplore('short');
+      return;
+    }
+    if (Math.abs(x) <= 220 && Math.abs(y + 36) <= 34) {
+      this.dispatchExplore('long');
+      return;
+    }
+    if (Math.abs(x) <= 150 && Math.abs(y + 140) <= 24) {
+      this.closeExploreDialog();
+    }
+  }
+
+  private dispatchExplore(kind: ExploreKind): void {
+    const save = GameSave.data;
+    if (!save) return;
+    const pet = save.pets.find(p => p.id === this._explorePetId);
+    if (!pet) {
+      this.closeExploreDialog();
+      return;
+    }
+    if (!ExploreSystem.canDispatch(save, pet)) {
+      this.showToast('它现在还不能出门');
+      this.closeExploreDialog();
+      return;
+    }
+    ExploreSystem.dispatch(save, pet, kind);
+    GameSave.markDirty();
+    this.closeExploreDialog(false);
+    this.say(kind === 'short' ? '我出去转转，很快就回来' : '我出远门啦，等我回来');
+    this.showToast(kind === 'short' ? '短途探险开始（约 2 小时）' : '远征开始（约 8 小时）');
+    this.refreshHud();
+  }
+
+  private closeExploreDialog(returnHome: boolean = true): void {
+    this._exploreDlg?.destroy();
+    this._exploreDlg = null;
+    this._explorePetId = '';
+    if (returnHome) this._dragPet?.cancel();
+  }
+
+  private recallExploring(): void {
+    const save = GameSave.data;
+    if (!save) return;
+    const pet = ExploreSystem.exploringPets(save)[0];
+    if (!pet) {
+      this.showToast('没有在外面的小家伙');
+      return;
+    }
+    ExploreSystem.recall(save, pet);
+    GameSave.markDirty();
+    this.refreshHud();
+  }
+
+  private recallPos(): { x: number; y: number } {
+    return { x: this._w / 2 - 92, y: this._h / 2 - 146 };
+  }
+
+  // ===== 调试面板（?dev=1，T11/T13 验收）=====
+
+  private devPos(i: number): { x: number; y: number } {
+    return { x: this._w / 2 - 86, y: this._h / 2 - 220 - i * 62 };
+  }
+
+  private hitDevButton(x: number, y: number): number {
+    for (let i = 0; i < 3; i++) {
+      const p = this.devPos(i);
+      if (Math.abs(x - p.x) <= 76 && Math.abs(y - p.y) <= 28) return i;
+    }
+    return -1;
+  }
+
+  private runDev(idx: number): void {
+    const save = GameSave.data;
+    if (!save) return;
+    if (idx === 0) {
+      DebugTools.fastForwardGrowth(save, 24);
+      this.showToast('成长快进 24 小时');
+    } else if (idx === 1) {
+      DebugTools.fastForwardDays(save, 1);
+      this.showToast('快进 1 天');
+    } else {
+      DebugTools.fastForwardDays(save, 7);
+      this.showToast('快进 7 天');
+      console.log('[Dev] 7天后 食物=', save.food, '蛋=', save.eggs.length, '星尘=', save.stardust);
+    }
+    this.refreshHud();
+  }
+
   // ===== 互动动作 =====
 
   private petSwipe(): void {
@@ -328,9 +648,12 @@ export class GameUI extends Component {
     const now = Date.now();
     if (now - this._lastPetTs < 320) return;
     this._lastPetTs = now;
+    // 长风（胆小）：久别后第一次互动先炸毛（T14）
+    const special = PetPersonality.firstResponse(save, pet);
     TouchPet.perform(save, pet);
     GameSave.markDirty();
-    this.say(PetBehavior.pickInteractLine(save, pet, 'pet'));
+    PetBehavior.refresh(save, pet);
+    this.say(special ?? PetBehavior.pickInteractLine(save, pet, 'pet'));
   }
 
   private poke(): void {
@@ -345,6 +668,7 @@ export class GameUI extends Component {
     if (pet) {
       PokePlay.poke(save, pet);
       GameSave.markDirty();
+      PetBehavior.refresh(save, pet);
       this.say(PetBehavior.pickInteractLine(save, pet, 'play'));
       return;
     }
@@ -365,6 +689,7 @@ export class GameUI extends Component {
     }
     if (DragFeed.perform(save, pet)) {
       GameSave.markDirty();
+      PetBehavior.refresh(save, pet);
       this.say(PetBehavior.pickInteractLine(save, pet, 'feed'));
     } else {
       this.showToast('食物柜空了，明天再来');
@@ -434,9 +759,48 @@ export class GameUI extends Component {
     this._eggTf.setPosition(0, -16, 0);
 
     // 底部提示
-    this._hint = label('Hint', '轻抚 · 投喂 · 逗玩', 18, UI.TEXT_LIGHT, 500, 30);
+    this._hint = label('Hint', '按住拖动 · 轻抚 · 投喂 · 逗玩', 18, UI.TEXT_LIGHT, 560, 30);
     this._hint.setParent(this.node);
-    this._hint.setPosition(0, -h / 2 + 30);
+    this._hint.setPosition(0, -h / 2 + 32);
+
+    // T16：陪伴爪印进度（无数字）
+    this._pawPill = panel('PawPill', 360, 56, UI.BG, 26);
+    this._pawPill.setParent(this.node);
+    this._pawPill.setPosition(0, -h / 2 + 96);
+    const pawLb = label('PawLabel', '陪伴', 16, UI.TEXT_LIGHT, 60, 26);
+    pawLb.setParent(this._pawPill);
+    pawLb.setPosition(-140, 0);
+    const pawTf = uiNode('PawMarks', 300, 36);
+    pawTf.setParent(this._pawPill);
+    pawTf.setPosition(24, 0);
+    this._pawG = pawTf.addComponent(Graphics);
+
+    // T16：今日想见你标记
+    this._missYouPill = panel('MissYouPill', 340, 44, new Color(255, 244, 224, 235), 22);
+    this._missYouPill.setParent(this.node);
+    this._missYouPill.setPosition(0, h / 2 - 136);
+    this._missYouLb = this.addLabelInside(this._missYouPill, '', 17, UI.WARM_DARK, 320, 44);
+    this._missYouPill.active = false;
+
+    // T12：召回按钮（有宠物在外面时显示）
+    this._recallBtn = button('RecallBtn', '召回', 150, 56, UI.BG, UI.TEXT, 20);
+    this._recallBtn.setParent(this.node);
+    this._recallBtn.setPosition(this.recallPos().x, this.recallPos().y);
+    this._recallBtn.active = false;
+
+    // T11/T13：调试面板（仅 ?dev=1）
+    if (DebugTools.enabled) {
+      this._devPanel = uiNode('DevPanel', 180, 200);
+      this._devPanel.setParent(this.node);
+      const labels = ['成长+24h', '快进1天', '快进7天'];
+      labels.forEach((text, i) => {
+        const b = button('DevBtn' + i, text, 150, 54, new Color(86, 110, 140, 235),
+          new Color(255, 255, 255, 255), 18);
+        b.setParent(this._devPanel!);
+        const p = this.devPos(i);
+        b.setPosition(p.x, p.y);
+      });
+    }
 
     // 拖拽食物点
     this._dragDot = circle('DragFood', 20, new Color(240, 200, 140, 255));
@@ -502,6 +866,10 @@ export class GameUI extends Component {
     Events.on(EventName.StardustChanged, this.onDustChanged);
     Events.on(EventName.PetInteracted, this.onInteracted);
     Events.on(EventName.ActivePetSwitched, this.onSwitch);
+    Events.on(EventName.PetStageChanged, this.onStageChanged);
+    Events.on(EventName.ExploreReturned, this.onExploreReturned);
+    Events.on(EventName.MissYouToday, this.onMissYouToday);
+    Events.on(EventName.PetBehaviorChanged, this.onBehaviorChanged);
   }
 
   private onDialogRequest = (text: unknown): void => {
@@ -521,6 +889,90 @@ export class GameUI extends Component {
 
   private onSwitch = (): void => {
     this.refreshHud();
+    this.refreshMissYou();
+  };
+
+  // ===== T11 阶段进阶演出 =====
+
+  private onStageChanged = (petId: unknown, stage: unknown): void => {
+    const save = GameSave.data;
+    const pet = save?.pets.find(p => p.id === petId);
+    if (!save || !pet) return;
+    if (save.activePetId === pet.id) {
+      this._petView?.playReaction('celebrate', 1.6);
+    }
+    let text = '';
+    switch (stage as Stage) {
+      case Stage.Baby:
+        text = '它第一次站起来，摇摇晃晃地扑向你';
+        break;
+      case Stage.Adult:
+        text = '学会了新动作，得意地等你夸它（现在可以拖到门口出门探险了）';
+        break;
+      case Stage.Final:
+        text = '完全体达成！它围着你转了一圈又一圈';
+        break;
+      default:
+        return;
+    }
+    this.showToast(this.stageText(stage as Stage));
+    this.say(text);
+    this.refreshHud();
+    this.refreshMissYou();
+  };
+
+  // ===== T12 探索归来 =====
+
+  private onExploreReturned = (_petId: unknown, result: unknown): void => {
+    const r = result as ExploreResult | null;
+    if (!r) return;
+    let msg = r.story;
+    if (r.foodGained > 0) msg += `（带回 ${r.foodGained} 份食物）`;
+    if (r.eggGained) msg += r.eggQueued ? '（窝边多了一枚灵卵）' : '（还带回一枚灵卵）';
+    this.say(msg);
+    this.showToast(r.recalled ? '它提前回来了' : '探险归来');
+    this.refreshHud();
+  };
+
+  // ===== T16 今日想见你 / 失落台词 =====
+
+  private refreshMissYou(): void {
+    const save = GameSave.data;
+    const pet = save ? MissYouService.current(save) : null;
+    if (!this._missYouPill || !this._missYouLb) return;
+    if (!pet) {
+      this._missYouPill.active = false;
+      return;
+    }
+    const name = getSpecies(pet.speciesId)?.name ?? '';
+    this._missYouLb.string = `今天想见你 · ${name}`;
+    this._missYouPill.active = true;
+  }
+
+  private announceMissYou(): void {
+    const save = GameSave.data;
+    const pet = save ? MissYouService.current(save) : null;
+    if (!pet || !save) return;
+    if (save.activePetId === pet.id) {
+      DialogBubble.show('今天特别想见到你呀');
+    }
+  }
+
+  private onMissYouToday = (): void => {
+    this.refreshMissYou();
+    this.showToast('今天想见你 · 与它互动星尘翻倍');
+  };
+
+  private onBehaviorChanged = (petId: unknown, behavior: unknown): void => {
+    if (behavior !== Behavior.Sad) return;
+    const save = GameSave.data;
+    const pet = save ? Collection.getActivePet(save) : undefined;
+    if (!save || !pet || pet.id !== petId) return;
+    const now = Date.now();
+    if (now - this._lastSadLineTs < 90_000) return;
+    this._lastSadLineTs = now;
+    if (DialogBubble.currentText) return;
+    this.say(PetBehavior.pickIdleLine(save, pet, Behavior.Sad));
   };
 
   // ===== 新手三选一 =====

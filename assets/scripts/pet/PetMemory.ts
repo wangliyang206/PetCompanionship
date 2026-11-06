@@ -59,6 +59,17 @@ export class PetMemory {
     return this.feedCountSince(save, hours) + this.playCountSince(save, hours) + this.petCountSince(save, hours);
   }
 
+  /** 今天（自然日）互动次数：喂食+玩耍+抚摸（互动星尘上限用） */
+  static todayInteractCount(save: SaveData): number {
+    const midnight = TimeService.todayMidnight();
+    return save.memory.filter(m =>
+      m.ts >= midnight && (
+        m.type === MemoryEventType.Feeding ||
+        m.type === MemoryEventType.Playing ||
+        m.type === MemoryEventType.Pet
+      )).length;
+  }
+
   /** 最近一次探索归来事件 */
   static lastExploreStory(save: SaveData): MemoryEvent | undefined {
     for (let i = save.memory.length - 1; i >= 0; i--) {

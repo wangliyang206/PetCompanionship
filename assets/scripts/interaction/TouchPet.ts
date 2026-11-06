@@ -12,6 +12,7 @@ import { TimeService } from '../core/TimeService';
 import { PetMemory } from '../pet/PetMemory';
 import { GameConfig } from '../core/GameConfig';
 import { Events, EventName } from '../core/Events';
+import { Economy } from '../economy/Economy';
 
 export class TouchPet {
 
@@ -20,6 +21,7 @@ export class TouchPet {
     pet.companionship += delta;
     pet.lastInteractTs = TimeService.safeNow(save.lastSeenTs);
     PetMemory.add(save, MemoryEventType.Pet);
+    Economy.awardInteractStardust(save, pet);
     Events.emit(EventName.PetInteracted, pet.id, 'pet');
     return delta;
   }

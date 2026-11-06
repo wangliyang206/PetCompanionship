@@ -11,6 +11,8 @@ import {
 } from 'cc';
 import { GameSave } from '../core/GameSave';
 import { makePlainMaterial, PetView } from '../pet/PetView';
+import { WanderSystem } from '../pet/WanderSystem';
+import { SceneAnchors } from './SceneAnchors';
 import { GameUI } from '../ui/GameUI';
 
 export class SceneSetup {
@@ -27,10 +29,14 @@ export class SceneSetup {
     view.setDesignResolutionSize(720, 1280, ResolutionPolicy.FIXED_HEIGHT);
 
     this.styleScene(scene);
+    SceneAnchors.ensure(scene);
 
     const anchor = scene.getChildByName('PetAnchor');
     if (anchor && !anchor.getComponent(PetView)) {
       anchor.addComponent(PetView);
+    }
+    if (anchor && !anchor.getComponent(WanderSystem)) {
+      anchor.addComponent(WanderSystem);
     }
 
     let canvasNode = scene.getChildByName('Canvas');

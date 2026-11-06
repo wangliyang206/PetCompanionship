@@ -10,6 +10,7 @@ import { TimeService } from '../core/TimeService';
 import { PetMemory } from '../pet/PetMemory';
 import { GameConfig } from '../core/GameConfig';
 import { Events, EventName } from '../core/Events';
+import { Economy } from '../economy/Economy';
 
 export class PokePlay {
 
@@ -19,6 +20,7 @@ export class PokePlay {
     pet.companionship += delta;
     pet.lastInteractTs = TimeService.safeNow(save.lastSeenTs);
     PetMemory.add(save, MemoryEventType.Playing);
+    Economy.awardInteractStardust(save, pet);
     Events.emit(EventName.PetInteracted, pet.id, 'play');
     return delta;
   }

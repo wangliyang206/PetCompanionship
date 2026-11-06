@@ -17,9 +17,17 @@ export class GameSave {
   private static _data: SaveData | null = null;
   private static _dirty: boolean = false;
   private static _initialized: boolean = false;
+  private static _sessionStartTs: number = 0;
 
   /** 当前是否已初始化（load 过） */
   static get isInitialized(): boolean { return this._initialized; }
+
+  /**
+   * 本次启动时的 lastSeenTs 快照。
+   * lastSeenTs 会在自动落盘时被刷新，行为状态机判断"离线多久"必须用启动快照，
+   * 否则运行 30 秒后离线时长就被抹平了（见 docs/06 D25）。
+   */
+  static get sessionStartTs(): number { return this._sessionStartTs; }
 
   /** 当前内存中的存档数据（未 load 过返回 null） */
   static get data(): SaveData | null { return this._data; }
@@ -50,6 +58,7 @@ export class GameSave {
       }
     }
 
+    this._sessionStartTs = this._data.lastSeenTs;
     Events.emit(EventName.SaveLoaded, this._data);
     return this._data;
   }
@@ -83,6 +92,7 @@ export class GameSave {
     this._data = null;
     this._dirty = false;
     this._initialized = false;
+    this._sessionStartTs = 0;
     console.log('[GameSave] 存档已删除');
   }
 
