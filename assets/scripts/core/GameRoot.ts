@@ -86,10 +86,18 @@ export class GameRoot {
 }
 
 // ===== 模块级自举（见文件头说明）=====
-director.once(Director.EVENT_AFTER_SCENE_LAUNCH, () => {
+const launch = (tag: string): void => {
   GameRoot.bootstrap();
-  console.log('[GameRoot] 启动编排完成');
-});
+  console.log(`[GameRoot] 启动编排完成（${tag}）`);
+};
+
+director.once(Director.EVENT_AFTER_SCENE_LAUNCH, () => launch('scene-launch'));
+
+// 兜底：若脚本是在场景已运行后才被导入（编辑器预览 / 热重载），场景启动事件不会再触发，
+// 延迟一拍检查并直接启动一次（bootstrap 幂等）。
+setTimeout(() => {
+  if (!GameRoot.booted && director.getScene()) launch('late-import');
+}, 0);
 
 game.on(Game.EVENT_HIDE, () => {
   GameRoot.flush();
