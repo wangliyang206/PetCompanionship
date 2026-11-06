@@ -21,6 +21,16 @@ import { PetViewModel } from '../pet/PetViewModel';
 
 const { ccclass } = _decorator;
 
+/** Mesh 子资源路径：resources/<id>/<id>_<stage>.glb → <id>/<id>_<stage>/node_0（cc.Mesh） */
+export function petMeshKey(path: string): string {
+  const base = path
+    .replace(/^resources\//, '')
+    .replace(/\.(glb|fbx|obj|prefab)$/i, '');
+  const segs = base.split('/');
+  segs[segs.length - 1] = 'node_0';
+  return segs.join('/');
+}
+
 /**
  * 纯色材质（不引用任何贴图）。
  * 注意：真机上 EffectAsset.get('builtin-standard') 可能为 null（内建 effect 未注册），
@@ -67,8 +77,8 @@ export function makePlainMaterial(hex: string): Material | null {
   return null;
 }
 
-/** 模型目标高度（世界单位），按阶段微调 */
-const TARGET_HEIGHT: Record<Stage, number> = {
+/** 模型目标高度（世界单位），按阶段微调（卡片人像也用同一套，见 PetPortrait） */
+export const PET_TARGET_HEIGHT: Record<Stage, number> = {
   [Stage.Egg]: 0.75,
   [Stage.Baby]: 0.85,
   [Stage.Adult]: 1.15,
@@ -212,7 +222,7 @@ export class PetView extends Component {
    * 纯色材质既避开贴图解码/上传，也把首次显示体积降到最低（见 docs/06 D11）。
    */
   private loadModel(path: string, themeHex: string): void {
-    const key = this.toMeshKey(path);
+    const key = petMeshKey(path);
     this._loadKey = path;
     Color.fromHEX(this._themeColor, themeHex);
     resources.load(key, Mesh, (err, mesh) => {
@@ -236,19 +246,9 @@ export class PetView extends Component {
       }
       this._model = node;
       this.applyModelVisibility();
-      this.fitModel(node, mesh, TARGET_HEIGHT[this._stage]);
+      this.fitModel(node, mesh, PET_TARGET_HEIGHT[this._stage]);
       this.applyBehavior();
     });
-  }
-
-  /** Mesh 子资源路径：.../<id>_<stage>/node_0（cc.Mesh） */
-  private toMeshKey(path: string): string {
-    const base = path
-      .replace(/^resources\//, '')
-      .replace(/\.(glb|fbx|obj|prefab)$/i, '');
-    const segs = base.split('/');
-    segs[segs.length - 1] = 'node_0';
-    return segs.join('/');
   }
 
   /** 按 Mesh 包围盒归一化高度，并把脚底对齐到 y=0 */

@@ -354,6 +354,27 @@ function drawSparks(g: Graphics, id: string, st: EggStyle): void {
 
 // ===== 对外：窝（软垫） =====
 
+/**
+ * 「恭喜获得」卡片中间的人像舞台几何（GameUI 定位 Sprite、drawRevealCard 排台座与投影都用它）。
+ * 三处必须一致，否则模型会「浮」在台座外面。
+ */
+export const REVEAL_STAGE = {
+  /** 人像 Sprite 边长（设计像素） */
+  size: 264,
+  /** Sprite 中心相对卡片中心（卡面原点）的 y */
+  cy: -16,
+  /**
+   * 正交取景高度 = 模型高度 × 该系数。越小模型越大。
+   * 1.6 是实机截图量出来的：模型占窗口约 62%，上下留白对称，脚底正好压在投影上。
+   */
+  orthoK: 1.6,
+};
+
+/** 模型脚底相对人像中心的像素偏移（正数表示在中心下方） */
+export function portraitFootOffset(): number {
+  return (REVEAL_STAGE.size / 2) / REVEAL_STAGE.orthoK;
+}
+
 // ===== 对外：破壳「恭喜获得」卡片的 Graphics 部分（标签由 GameUI 叠加） =====
 
 /** 恭喜卡配色：稀有度色 + 物种主题色 */
@@ -377,66 +398,91 @@ export function drawRevealCard(g: Graphics, st: RevealCardStyle): void {
   for (let i = 0; i < 3; i++) {
     const pad = 14 + i * 9;
     g.fillColor = new Color(rar.r, rar.g, rar.b, 26 - i * 6);
-    g.roundRect(-280 - pad, -330 - pad, 560 + pad * 2, 660 + pad * 2, 30 + pad);
+    g.roundRect(-280 - pad, -370 - pad, 560 + pad * 2, 740 + pad * 2, 30 + pad);
     g.fill();
   }
   // 面板本体 + 同色描边
   g.fillColor = col('#FFF6E8', 255);
-  g.roundRect(-280, -330, 560, 660, 28);
+  g.roundRect(-280, -370, 560, 740, 30);
   g.fill();
   g.lineWidth = 3;
   g.strokeColor = new Color(rar.r, rar.g, rar.b, 210);
-  g.roundRect(-280, -330, 560, 660, 28);
+  g.roundRect(-280, -370, 560, 740, 30);
   g.stroke();
 
   // 顶部稀有度绶带（上圆角与卡片对齐，下缘压平；色压深一档，白字才清楚）
   const rb = deep(rar, 0.74);
   g.fillColor = rb;
-  g.roundRect(-280, 242, 560, 88, 28);
+  g.roundRect(-280, 282, 560, 88, 30);
   g.fill();
-  g.rect(-280, 242, 560, 44);
+  g.rect(-280, 282, 560, 44);
   g.fill();
   // 绶带下缘一道细高光，把「缎带」和「纸面」分开
   g.lineWidth = 2;
   g.strokeColor = new Color(255, 255, 255, 60);
-  g.moveTo(-252, 241); g.lineTo(252, 241); g.stroke();
+  g.moveTo(-252, 281); g.lineTo(252, 281); g.stroke();
 
   // 标签底：稀有度（左）+ 系别（右）
   g.fillColor = new Color(rar.r, rar.g, rar.b, 34);
-  g.roundRect(-196, 62, 160, 54, 27);
+  g.roundRect(-196, 149, 160, 54, 27);
   g.fill();
   g.fillColor = new Color(theme.r, theme.g, theme.b, 40);
-  g.roundRect(36, 62, 160, 54, 27);
+  g.roundRect(36, 149, 160, 54, 27);
   g.fill();
 
-  // 系徽：圆章 + 一圈符文点 + 四芒星（填住卡面中部，避免「一张纸中间一块空」）
-  const cy = -20;
-  g.fillColor = new Color(theme.r, theme.g, theme.b, 26);
-  g.circle(0, cy, 54);
-  g.fill();
-  g.lineWidth = 2;
-  g.strokeColor = new Color(rar.r, rar.g, rar.b, 120);
-  g.circle(0, cy, 54);
-  g.stroke();
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
-    g.fillColor = new Color(rar.r, rar.g, rar.b, 150);
-    g.circle(Math.cos(a) * 54, cy + Math.sin(a) * 54, 2.4);
+  // ===== 人像舞台：宠物模型由 PetPortrait（RenderTexture + Sprite）叠在中间，这里只画台座 =====
+  const cy = REVEAL_STAGE.cy;
+  const R = REVEAL_STAGE.size / 2 - 10;
+  // 台座外发光：由外向内逐层加深，读作「从卡面浮起来的一盏灯」
+  for (let i = 0; i < 4; i++) {
+    const rr = R + 16 - i * 5;
+    g.fillColor = new Color(theme.r, theme.g, theme.b, 8 + i * 4);
+    g.circle(0, cy, rr);
     g.fill();
   }
-  g.fillColor = new Color(theme.r, theme.g, theme.b, 42);
-  g.circle(0, cy, 40);
+  // 台座本体：只做一层极浅的主题色（叠太多层会把台座压成「泥坑」，模型反而糊进去）；
+  // 「仪式感」交给外发光、细环与符文点，台座本身要够亮，模型才有轮廓。
+  g.fillColor = new Color(theme.r, theme.g, theme.b, 26);
+  g.circle(0, cy, R);
   g.fill();
-  star4(g, 0, cy, 28, '#FFF6E0', 250);
+  // 中心一小圈柔光：像脚下有一盏灯把模型托起来
+  g.fillColor = col('#FFFDF6', 105);
+  g.circle(0, cy - 8, R - 56);
+  g.fill();
+  // 台座边环：稀有度色细环 + 一圈符文点（替代原来的系徽，位置让给模型）
+  g.lineWidth = 2;
+  g.strokeColor = new Color(rar.r, rar.g, rar.b, 120);
+  g.circle(0, cy, R);
+  g.stroke();
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2 - Math.PI / 2;
+    const big = i % 4 === 0;
+    g.fillColor = new Color(rar.r, rar.g, rar.b, big ? 170 : 95);
+    g.circle(Math.cos(a) * R, cy + Math.sin(a) * R, big ? 3 : 1.8);
+    g.fill();
+  }
+
+  // 脚下投影：位置由取景系数反算（模型脚底 == 窗口中心下方 size/2/orthoK），
+  // 画在 Sprite 之前 → 模型踩在影子上，而不是浮着。
+  const fy = cy - portraitFootOffset();
+  g.fillColor = new Color(120, 82, 46, 20);
+  g.ellipse(0, fy - 2, 70, 16);
+  g.fill();
+  g.fillColor = new Color(104, 70, 38, 28);
+  g.ellipse(0, fy, 52, 12);
+  g.fill();
+  g.fillColor = new Color(72, 46, 24, 32);
+  g.ellipse(0, fy + 2, 32, 8);
+  g.fill();
 
   // 分隔装饰：细线 + 双菱形
   g.lineWidth = 1;
   g.strokeColor = col('#FFD9A8', 70);
-  g.moveTo(-150, -168); g.lineTo(-26, -168); g.stroke();
-  g.moveTo(26, -168); g.lineTo(150, -168); g.stroke();
+  g.moveTo(-150, -244); g.lineTo(-26, -244); g.stroke();
+  g.moveTo(26, -244); g.lineTo(150, -244); g.stroke();
   g.fillColor = col('#FFD9A8', 130);
-  g.moveTo(-26, -163); g.lineTo(-21, -168); g.lineTo(-26, -173); g.lineTo(-31, -168); g.close(); g.fill();
-  g.moveTo(26, -163); g.lineTo(31, -168); g.lineTo(26, -173); g.lineTo(21, -168); g.close(); g.fill();
+  g.moveTo(-26, -239); g.lineTo(-21, -244); g.lineTo(-26, -249); g.lineTo(-31, -244); g.close(); g.fill();
+  g.moveTo(26, -239); g.lineTo(31, -244); g.lineTo(26, -249); g.lineTo(21, -244); g.close(); g.fill();
 }
 
 /** 月牙填充：外椭圆下弧 + 内椭圆回程，用于「窝的前唇」这种双弧夹出来的带子 */

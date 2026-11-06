@@ -35,8 +35,9 @@ import { TimeService } from '../core/TimeService';
 import { getSpecies } from '../pet/PetDefs';
 import { PetState } from '../core/SaveData';
 import { UI, button, circle, label, panel, uiNode } from './UiFactory';
-import { EGG_STYLES, createEggNode, createEggPedestal, drawNestFront, drawNestPad, drawRevealCard, hashId } from './EggArt';
+import { EGG_STYLES, REVEAL_STAGE, createEggNode, createEggPedestal, drawNestFront, drawNestPad, drawRevealCard, hashId } from './EggArt';
 import { createOnboardingBackdrop } from './OnboardingBackdrop';
+import { PetPortrait } from './PetPortrait';
 
 const { ccclass } = _decorator;
 
@@ -95,6 +96,7 @@ export class GameUI extends Component {
   // T28：点按 ready 蛋 → 破壳演出 → 「恭喜获得」宠物卡片
   private _hatchPerforming = false;
   private _reveal: Node | null = null;          // 恭喜卡片（模态，轻触关闭）
+  private _portrait: PetPortrait | null = null;  // 卡片中间的宠物人像（真实模型 → RenderTexture）
   private _pendingGreet = '';                    // 卡片关掉后再说的第一句问候
 
   private _toastTimer = 0;
@@ -170,6 +172,8 @@ export class GameUI extends Component {
           'activePetId=', save.activePetId,
           'petView.stage=', pv?._stage, 'model=', !!pv?._model, 'model.active=', pv?._model?.active,
           'modelVisible=', pv?._modelVisible, 'loadKey=', pv?._loadKey);
+        const portrait = this._portrait as unknown as { state?: string } | null;
+        console.log('[AutoHatch] 卡片人像 state=', portrait?.state ?? 'none');
       }, 9.0);
     }
   }
@@ -204,6 +208,7 @@ export class GameUI extends Component {
     this.updateBehavior(dt);
     this.updateProgress(dt);
     this.updateRecallBtn();
+    this._portrait?.tick(dt);
   }
 
   private updatePetScreen(): void {
@@ -277,7 +282,7 @@ export class GameUI extends Component {
     const save = GameSave.data;
     if (!save || !this._cam || !this._petView) {
       this._eggOverlay.active = false;
-      this._petView?.setModelVisible(true);
+      this._petView?.setModelVisible(!this._reveal);
       return;
     }
     const ready = EggSystem.findReadyEggs(save)[0];
@@ -1103,9 +1108,9 @@ export class GameUI extends Component {
     Color.fromHEX(theme, species.themeColor);
 
     // 卡片本体
-    const card = uiNode('RevealCard', 560, 660);
+    const card = uiNode('RevealCard', 560, 740);
     card.setParent(root);
-    card.setPosition(0, 20, 0);
+    card.setPosition(0, 10, 0);
     card.setScale(0.55, 0.55, 1);
     const g = card.addComponent(Graphics);
     drawRevealCard(g, { rar: rarColor, theme });
@@ -1113,46 +1118,43 @@ export class GameUI extends Component {
     // 标题 / 名字 / 标签 / 台词 / 装饰 / 提示
     const title = label('RevealTitle', '恭 喜 获 得 新 伙 伴', 30, new Color(255, 250, 240, 255), 500, 40);
     title.setParent(card);
-    title.setPosition(0, 286);
+    title.setPosition(0, 326);
 
     const name = label('RevealName', `「${species.name}」`, 56, UI.TEXT, 500, 76);
     name.setParent(card);
-    name.setPosition(0, 168);
+    name.setPosition(0, 232);
 
     // 标签底由 drawRevealCard 画，这里只放文字；文字用压深一档的同色系（纯稀有度色放在浅底上对比不足）
     const deepRar = new Color(Math.round(rarColor.r * 0.72), Math.round(rarColor.g * 0.72), Math.round(rarColor.b * 0.72), 255);
     const deepTheme = new Color(Math.round(theme.r * 0.62), Math.round(theme.g * 0.62), Math.round(theme.b * 0.62), 255);
     const rarLabel = label('RevealRar', GameUI.RARITY_LABEL[species.rarity] ?? '', 24, deepRar, 160, 54);
     rarLabel.setParent(card);
-    rarLabel.setPosition(-116, 89);
+    rarLabel.setPosition(-116, 176);
     const xiLabel = label('RevealXi', GameUI.XI_LABEL[species.xi] ?? '', 24, deepTheme, 160, 54);
     xiLabel.setParent(card);
-    xiLabel.setPosition(116, 89);
+    xiLabel.setPosition(116, 176);
 
     // 初见台词：从它的开心台词里挑一句
     const quotes = species.lines.happy;
     const quote = quotes.length ? quotes[Math.floor(Math.random() * quotes.length)] : '……';
     const quoteLb = label('RevealQuote', `「${quote}」`, 24, UI.TEXT_LIGHT, 480, 60);
     quoteLb.setParent(card);
-    quoteLb.setPosition(0, -108);
+    quoteLb.setPosition(0, -196);
 
-    // 分隔装饰：细线 + 菱形
-    g.lineWidth = 1;
-    g.strokeColor = new Color(255, 217, 168, 70);
-    g.moveTo(-150, -108); g.lineTo(-26, -108); g.stroke();
-    g.moveTo(26, -108); g.lineTo(150, -108); g.stroke();
-    g.fillColor = new Color(255, 217, 168, 130);
-    g.moveTo(-26, -103); g.lineTo(-21, -108); g.lineTo(-26, -113); g.lineTo(-31, -108); g.close(); g.fill();
-    g.moveTo(26, -103); g.lineTo(31, -108); g.lineTo(26, -113); g.lineTo(21, -108); g.close(); g.fill();
+    // 中间是宠物本人：真实模型渲染进 RenderTexture（PetPortrait），台座与投影由 drawRevealCard 画
+    this._portrait = new PetPortrait(card, REVEAL_STAGE.size, pet);
+    this._portrait.node.setPosition(0, REVEAL_STAGE.cy, 0);
+    // 遮罩是半透的，场景里那只宠物会从卡片外面透出一块亮斑 → 卡片期间先藏起来
+    this._petView?.setModelVisible(false);
 
     const nth = GameSave.data?.pets.length ?? 1;
     const home = label('RevealHome', `它是你收养的第 ${nth} 位伙伴`, 21, UI.TEXT_LIGHT, 400, 32);
     home.setParent(card);
-    home.setPosition(0, -212);
+    home.setPosition(0, -276);
 
     const hint = label('RevealHint', '轻 触 任 意 处 继 续', 16, new Color(150, 132, 112, 130), 400, 28);
     hint.setParent(card);
-    hint.setPosition(0, -282);
+    hint.setPosition(0, -340);
 
     // 入场：遮罩渐入 + 卡片回弹放大
     const cOp = card.addComponent(UIOpacity);
@@ -1166,6 +1168,12 @@ export class GameUI extends Component {
     const r = this._reveal;
     if (!r) return;
     this._reveal = null;
+    if (this._portrait) {
+      this._portrait.dispose();
+      this._portrait = null;
+    }
+    // 卡片收起 → 场景里的宠物回来
+    this._petView?.setModelVisible(true);
     const op = r.getComponent(UIOpacity);
     if (op) {
       tween(op).to(0.16, { opacity: 0 }).call(() => r.destroy()).start();
