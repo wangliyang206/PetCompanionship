@@ -140,6 +140,38 @@ export class GameUI extends Component {
       this.showGreeting();
       this.announceMissYou();
     }
+
+    // ？dev=1&autohatch=1：自动孵化链路复现（诊断「破壳后模型未加载」用，仅预览）
+    if (DebugTools.enabled && typeof location !== 'undefined' && /[?&]autohatch=1/.test(location.search)) {
+      this.scheduleOnce(() => {
+        const save = GameSave.data;
+        if (!save) return;
+        if (!save.pets.length && !save.eggs.length) {
+          const egg = EggSystem.createEgg(save, 'mao_tuantuan', EggSource.Starter);
+          egg.hatchesAt = TimeService.safeNow(save.lastSeenTs); // 立即可破壳
+          GameSave.markDirty();
+          console.log('[AutoHatch] 已创建 ready 蛋', egg.id);
+        } else {
+          console.log('[AutoHatch] 存档非空 pets=', save.pets.length, 'eggs=', save.eggs.length);
+        }
+      }, 1.0);
+      this.scheduleOnce(() => {
+        const save = GameSave.data;
+        const ready = save ? EggSystem.findReadyEggs(save)[0] : undefined;
+        console.log('[AutoHatch] 触发破壳 ready=', !!ready);
+        if (save && ready) this.runHatchPerformance(ready);
+      }, 3.0);
+      this.scheduleOnce(() => {
+        const save = GameSave.data;
+        if (!save) return;
+        const pv = this._petView as unknown as
+          { _stage: Stage; _model: { active: boolean } | null; _loadKey: string; _modelVisible: boolean } | null;
+        console.log('[AutoHatch] 诊断 pets=', save.pets.length, 'eggs=', save.eggs.length,
+          'activePetId=', save.activePetId,
+          'petView.stage=', pv?._stage, 'model=', !!pv?._model, 'model.active=', pv?._model?.active,
+          'modelVisible=', pv?._modelVisible, 'loadKey=', pv?._loadKey);
+      }, 9.0);
+    }
   }
 
   onDestroy(): void {
