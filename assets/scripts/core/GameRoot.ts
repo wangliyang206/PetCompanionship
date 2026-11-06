@@ -8,6 +8,7 @@
  */
 
 import { director, Director, game, Game } from 'cc';
+import { SceneSetup } from './SceneSetup';
 import { SaveData } from './SaveData';
 import { GameSave } from './GameSave';
 import { EggSystem } from '../egg/EggSystem';
@@ -21,6 +22,7 @@ export class GameRoot {
 
   private static _save: SaveData | null = null;
   private static _booted = false;
+  private static _autosaveTimer: ReturnType<typeof setInterval> | null = null;
 
   /** 当前存档（未 bootstrap 前为 null） */
   static get save(): SaveData | null { return this._save; }
@@ -35,33 +37,46 @@ export class GameRoot {
 
     const save = GameSave.load();
 
+    // 先挂事件监听，再离线结算：完全体/破壳/探索归来等事件在结算期间发出，
+    // 若监听晚于结算会永久丢失（P2-8）
+    NotifierBridge.attach(save);
+    WidgetBridge.attach(save);
+    if (NotifierBridge.nativeAvailable && !NotifierBridge.hasPermission()) {
+      NotifierBridge.requestPermission();
+    }
+
     // 离线结算顺序：先补位孵化（会产生新的倒计时），再结算成长与探索，最后发每日奖励
     EggSystem.promoteQueuedEggs(save);
     GrowthService.settleAllPets(save);
     ExploreSystem.settleAll(save);
     Economy.tryDaily(save);
 
-    // 通知与桌面组件（内部按存档重排，可重复调用）
-    NotifierBridge.attach(save);
-    if (NotifierBridge.nativeAvailable && !NotifierBridge.hasPermission()) {
-      NotifierBridge.requestPermission();
-    }
-    WidgetBridge.attach(save);
-
     GameSave.markDirty();
     this._save = save;
+    this.startAutosave();
+    SceneSetup.setup();
     return save;
+  }
+
+  /** 定时落盘：进程被系统杀掉（非 EVENT_HIDE）时不丢进度 */
+  private static startAutosave(): void {
+    if (this._autosaveTimer) return;
+    this._autosaveTimer = setInterval(() => {
+      GameSave.flush();
+    }, 30_000);
   }
 
   /** 回到前台：补结算并刷新通知/组件 */
   static resume(): void {
     const save = this._save;
     if (!save) return;
+    // 先按旧存档重排（清掉过期闹钟），再结算：结算期间发出的完全体事件不会被随后的重排取消
+    NotifierBridge.resync(save);
     EggSystem.promoteQueuedEggs(save);
     GrowthService.settleAllPets(save);
     ExploreSystem.settleAll(save);
-    NotifierBridge.resync(save);
     WidgetBridge.refresh();
+    GameSave.flush();
   }
 
   /** 切后台/退出：落盘 */

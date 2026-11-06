@@ -8,8 +8,10 @@
 import { Xi, Rarity, Stage } from '../core/Enums';
 import { PetDefStatic, PetLines } from '../core/SaveData';
 
-/** 辅助函数：生成占位资源路径 */
-const M = (stage: Stage, id: string): string => `resources/models/${id}/${id}_${stage}.glb`;
+/** 辅助函数：生成资源路径（Creator 为每个模型生成同名的 Prefab 子资源，路径含同名子目录） */
+const M = (stage: Stage, id: string): string => `resources/models/${id}/${id}_${stage}/${id}_${stage}.glb`;
+/** 缺少美术资源的物种：阶段模型先用团团占位（B1：其余两只有什么导什么，缺失用团团模型占位） */
+const M_FALLBACK = (stage: Stage): string => M(stage, 'mao_tuantuan');
 const A = (arr: string[]): string[] => arr;
 
 export const PetDefs: Record<string, PetDefStatic> = {
@@ -41,11 +43,11 @@ export const PetDefs: Record<string, PetDefStatic> = {
   mao_changfeng: {
     id: 'mao_changfeng', xi: Xi.Mao, name: '长风', rarity: Rarity.Rare,
     phase: 1, unlockLayer: 1, themeColor: '#8FB8C9', signature: 'signature_leap',
-    models: {
-      [Stage.Egg]: M(Stage.Egg, 'mao_changfeng'),
-      [Stage.Baby]: M(Stage.Baby, 'mao_changfeng'),
-      [Stage.Adult]: M(Stage.Adult, 'mao_changfeng'),
-      [Stage.Final]: M(Stage.Final, 'mao_changfeng'),
+    models: { // TODO(美术)：长风模型未产出，四阶段暂用团团占位
+      [Stage.Egg]: M_FALLBACK(Stage.Egg),
+      [Stage.Baby]: M_FALLBACK(Stage.Baby),
+      [Stage.Adult]: M_FALLBACK(Stage.Adult),
+      [Stage.Final]: M_FALLBACK(Stage.Final),
     },
     anims: {
       [Stage.Egg]: ['egg_breathe', 'egg_sway'],
@@ -65,11 +67,11 @@ export const PetDefs: Record<string, PetDefStatic> = {
   mao_arong: {
     id: 'mao_arong', xi: Xi.Mao, name: '阿绒', rarity: Rarity.Epic,
     phase: 1, unlockLayer: 1, themeColor: '#C7B8A1', signature: 'signature_dance',
-    models: {
-      [Stage.Egg]: M(Stage.Egg, 'mao_arong'),
-      [Stage.Baby]: M(Stage.Baby, 'mao_arong'),
-      [Stage.Adult]: M(Stage.Adult, 'mao_arong'),
-      [Stage.Final]: M(Stage.Final, 'mao_arong'),
+    models: { // TODO(美术)：阿绒模型未产出，四阶段暂用团团占位
+      [Stage.Egg]: M_FALLBACK(Stage.Egg),
+      [Stage.Baby]: M_FALLBACK(Stage.Baby),
+      [Stage.Adult]: M_FALLBACK(Stage.Adult),
+      [Stage.Final]: M_FALLBACK(Stage.Final),
     },
     anims: {
       [Stage.Egg]: ['egg_breathe', 'egg_sway'],

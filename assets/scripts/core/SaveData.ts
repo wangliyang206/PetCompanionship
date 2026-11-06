@@ -74,7 +74,7 @@ export function createDefaultSave(): SaveData {
     food: 0,
     stardust: 0,
     dailyGiftTs: 0,
-    eggPityTs: 0,
+    eggPityTs: now,
     eggs: [],
     pets: [],
     activePetId: '',
