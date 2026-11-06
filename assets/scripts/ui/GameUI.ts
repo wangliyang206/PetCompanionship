@@ -9,10 +9,11 @@
 
 import {
   _decorator, Camera, Color, Component, director, EventTouch, Graphics, input,
-  Input, Label, Node, tween, UIOpacity, Vec3, view,
+  Input, Label, Layers, Node, tween, UIOpacity, Vec2, Vec3, view,
 } from 'cc';
 import { GameConfig } from '../core/GameConfig';
 import { GameSave } from '../core/GameSave';
+import { SceneAnchors } from '../core/SceneAnchors';
 import { EggSystem } from '../egg/EggSystem';
 import { EggSource, Stage, Rarity, Behavior } from '../core/Enums';
 import { Events, EventName } from '../core/Events';
@@ -83,6 +84,16 @@ export class GameUI extends Component {
   private _dragPet: DragPet | null = null;
   private _dragMode = false;
 
+  // T25：孵化场景视觉可读
+  private _eggG: Graphics | null = null;        // 软垫 Graphics（环形 + 垫心）
+  private _eggOverlay: Node | null = null;      // 2D 灵卵叠加层（覆盖 3D 灰圆）
+  private _eggBarAtEgg = false;                  // 倒计时条是否跟随蛋位置
+
+  // T27：长按 ready 蛋 → 破壳演出
+  private _holdReadyEggId = '';
+  private _holdReadyStartTs = 0;
+  private _hatchPerforming = false;
+
   private _toastTimer = 0;
   private _bubbleTimer = 0;
   private _petScreen = { x: 0, y: 0 };
@@ -149,7 +160,9 @@ export class GameUI extends Component {
   update(dt: number): void {
     this.updatePetScreen();
     this.updateBubblePos();
+    this.updateEggOverlay();
     this.updateEggPill();
+    this.drawEggPad();
     this.updateToast(dt);
     this.updateBubbleTimer(dt);
     this.updateHold();
@@ -187,17 +200,23 @@ export class GameUI extends Component {
     if (ready) {
       if (this._eggText) this._eggText.string = '可以破壳了';
       if (this._eggBar) this.redrawBar(this._eggBar, 1);
-      return;
+    } else {
+      const total = (egg.source === EggSource.Starter ? GameConfig.EGG.STARTER_HATCH_MIN : GameConfig.EGG.NORMAL_HATCH_MIN) * 60_000;
+      const remain = Math.max(0, egg.hatchesAt - now);
+      const mm = Math.floor(remain / 60_000);
+      const ss = Math.floor((remain % 60_000) / 1000);
+      if (this._eggText) {
+        this._eggText.string = `孵化中 ${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+      }
+      if (this._eggBar) this.redrawBar(this._eggBar, total > 0 ? 1 - remain / total : 1);
     }
 
-    const total = (egg.source === EggSource.Starter ? GameConfig.EGG.STARTER_HATCH_MIN : GameConfig.EGG.NORMAL_HATCH_MIN) * 60_000;
-    const remain = Math.max(0, egg.hatchesAt - now);
-    const mm = Math.floor(remain / 60_000);
-    const ss = Math.floor((remain % 60_000) / 1000);
-    if (this._eggText) {
-      this._eggText.string = `孵化中 ${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+    // T25：倒计时条跟随蛋（PetAnchor 世界位置 → UI 投影 → 蛋下方 100px）
+    if (this._cam && this._petView) {
+      const wp = this._petView.displayWorldPos;
+      const ui = SceneAnchors.worldToUi(this._cam, wp);
+      this._eggPill.setPosition(ui.x, ui.y - 100, 0);
     }
-    if (this._eggBar) this.redrawBar(this._eggBar, total > 0 ? 1 - remain / total : 1);
   }
 
   private redrawBar(g: Graphics, ratio: number): void {
@@ -211,6 +230,114 @@ export class GameUI extends Component {
     g.fillColor = UI.WARM;
     g.roundRect(-w / 2, -h / 2, fillW, h, h / 2);
     g.fill();
+  }
+
+  // ===== T25：孵化场景视觉 —— 2D 灵卵叠加 + 软垫 =====
+
+  private _lastEggId = '';
+
+  /** 2D 灵卵叠加层：用 EggArt 绘制的精美灵卵，覆盖 3D 灰色 GLB 蛋 */
+  private updateEggOverlay(): void {
+    if (!this._eggOverlay) return;
+    const save = GameSave.data;
+    if (!save || !this._cam || !this._petView) {
+      this._eggOverlay.active = false;
+      return;
+    }
+    const ready = EggSystem.findReadyEggs(save)[0];
+    const incubating = PokePlay.getIncubatingEgg(save);
+    const egg = ready ?? incubating;
+    if (!egg) {
+      this._eggOverlay.active = false;
+      this._lastEggId = '';
+      return;
+    }
+    this._eggOverlay.active = true;
+
+    // 第一次出现这枚蛋时创建 2D 灵卵（有呼吸/星轨/光尘动效，只建一次）
+    if (this._lastEggId !== egg.id || this._eggOverlay.children.length === 0) {
+      this._lastEggId = egg.id;
+      this._eggOverlay.removeAllChildren();
+      const st = EGG_STYLES[hashId(egg.id) % EGG_STYLES.length];
+      const node = createEggNode(egg.id, st);
+      node.setParent(this._eggOverlay);
+    }
+
+    // 位置 = PetAnchor 世界坐标 → UI 投影（略上浮一点盖 3D 蛋）
+    const wp = this._petView.displayWorldPos;
+    const ui = SceneAnchors.worldToUi(this._cam, wp);
+    this._eggOverlay.setPosition(ui.x, ui.y + 22, 0);
+    // 缩放 0.5 让 2D 灵卵合适地盖在 3D 蛋上方
+    this._eggOverlay.setScale(0.5, 0.5, 1);
+
+    // ready 时闪白光提示可破壳
+    if (ready) {
+      const body = this._eggOverlay.getChildByName('EggBody');
+      if (body) {
+        // 已经在跑呼吸动效，额外加个 ready 闪烁光环
+        const aura = this._eggOverlay.getChildByName('EggAura');
+        if (aura) {
+          const op = aura.getComponent(UIOpacity);
+          if (op) tween(op).repeatForever(tween(op).to(0.6, { opacity: 255 }).to(0.6, { opacity: 120 })).start();
+        }
+      }
+    }
+  }
+
+  /** 软垫造型：在 HOME 世界位置投影处画一个可读的"窝"（环形 + 垫心椭圆 + 暖光） */
+  private drawEggPad(): void {
+    if (!this._eggG || !this._cam) return;
+    const g = this._eggG;
+    g.clear();
+    const home = SceneAnchors.homePosition();
+    const ui = SceneAnchors.worldToUi(this._cam, home);
+    g.node.setPosition(ui.x, ui.y - 8, 0);
+
+    // 阴影层（地面投射）
+    g.fillColor = new Color(80, 56, 30, 55);
+    g.ellipse(0, -6, 108, 26);
+    g.fill();
+    g.fillColor = new Color(80, 56, 30, 28);
+    g.ellipse(0, -6, 146, 34);
+    g.fill();
+
+    // 垫心主体（浅暖棕椭球）
+    g.fillColor = new Color(210, 165, 110, 255);
+    g.ellipse(0, 0, 112, 60);
+    g.fill();
+    g.fillColor = new Color(235, 196, 146, 255);
+    g.ellipse(-2, 6, 104, 52);
+    g.fill();
+    g.fillColor = new Color(255, 226, 186, 210);
+    g.ellipse(-6, 14, 86, 38);
+    g.fill();
+
+    // 外轮廓环形描边（毛线感）
+    g.lineWidth = 4;
+    g.strokeColor = new Color(120, 80, 40, 220);
+    g.ellipse(0, 0, 112, 60);
+    g.stroke();
+    g.lineWidth = 2;
+    g.strokeColor = new Color(155, 110, 60, 180);
+    g.ellipse(-2, 4, 96, 48);
+    g.stroke();
+
+    // 内圈亮边
+    g.lineWidth = 1.4;
+    g.strokeColor = new Color(255, 230, 190, 160);
+    g.ellipse(-4, 10, 72, 32);
+    g.stroke();
+
+    // 窝的绒毛纹理（6 个小圆点）
+    g.fillColor = new Color(140, 100, 60, 160);
+    const tufts = [
+      [-80, 8], [-60, 36], [-10, 46], [50, 40], [80, 10], [70, -30],
+      [-50, -36], [0, -46], [40, -42],
+    ];
+    for (const [tx, ty] of tufts) {
+      g.circle(tx, ty, 4 + Math.abs(tx) * 0.02);
+      g.fill();
+    }
   }
 
   private updateToast(dt: number): void {
@@ -235,21 +362,79 @@ export class GameUI extends Component {
     this._bubble.setPosition(x, y, 0);
   }
 
-  /** 长按蛋：每 0.5s 缩短 2 分钟 */
+  /** 长按蛋：incubating 每 450ms 减 2 分钟；ready 累积 900ms → 触发破壳演出 */
   private updateHold(): void {
     if (this._target !== 'pet' || this._moved > HIT.TAP) return;
+    if (this._hatchPerforming) return; // 演出进行中，忽略触摸
     const save = GameSave.data;
     if (!save) return;
-    const egg = PokePlay.getIncubatingEgg(save);
-    if (!egg) return;
-    const now = Date.now();
-    if (now - this._pressTs < 500) return;
-    if (now - this._lastEggTs < 450) return;
-    this._lastEggTs = now;
-    const reduce = PokePlay.longPressEgg(save, egg);
-    if (reduce > 0) {
-      this.showToast(`蛋壳震了一下（-${reduce / 60_000} 分钟）`);
-      GameSave.markDirty();
+
+    const ready = EggSystem.findReadyEggs(save)[0];
+    const incubating = PokePlay.getIncubatingEgg(save);
+
+    // ready 蛋：长按累积 → 破壳演出（不需要等 onTouchEnd）
+    if (ready) {
+      if (this._holdReadyEggId !== ready.id) {
+        this._holdReadyEggId = ready.id;
+        this._holdReadyStartTs = Date.now();
+      }
+      const held = Date.now() - this._holdReadyStartTs;
+      // 给 2D 灵卵加裂纹进度反馈
+      if (this._eggOverlay && this._holdReadyEggId) {
+        const ratio = Math.min(1, held / 900);
+        this.drawHatchCrack(ratio);
+      }
+      if (held >= 900) {
+        this._holdReadyEggId = '';
+        this.runHatchPerformance(ready);
+      }
+      return;
+    }
+
+    // incubating 蛋：每 0.5s 缩短 2 分钟
+    if (incubating) {
+      const now = Date.now();
+      if (now - this._pressTs < 500) return;
+      if (now - this._lastEggTs < 450) return;
+      this._lastEggTs = now;
+      const reduce = PokePlay.longPressEgg(save, incubating);
+      if (reduce > 0) {
+        this.showToast(`蛋壳震了一下（-${reduce / 60_000} 分钟）`);
+        GameSave.markDirty();
+      }
+    }
+  }
+
+  /** 在 2D 灵卵上画裂纹（破壳演出前的进度反馈） */
+  private _crackNode: Node | null = null;
+  private drawHatchCrack(ratio: number): void {
+    if (!this._eggOverlay) return;
+    // 懒创建：裂纹子节点只建一次
+    if (!this._crackNode) {
+      this._crackNode = new Node('EggCrack');
+      this._crackNode.layer = Layers.Enum.UI_2D;
+      this._crackNode.setParent(this._eggOverlay);
+    }
+    const g = this._crackNode.getComponent(Graphics) ?? this._crackNode.addComponent(Graphics);
+    g.clear();
+    g.lineWidth = 2.4;
+    g.strokeColor = new Color(60, 30, 10, Math.round(180 * ratio));
+    // 5 条从中心向外放射的裂纹，每条约 80px 长，按 ratio 截断
+    const segs = 5;
+    const len = 78 * ratio;
+    for (let i = 0; i < segs; i++) {
+      const a = (-Math.PI * 0.5) + (i / segs) * Math.PI + (Math.random() - 0.5) * 0.4;
+      g.moveTo(0, 0);
+      g.lineTo(Math.cos(a) * len, Math.sin(a) * len);
+      g.stroke();
+      // 小分支
+      if (ratio > 0.4) {
+        const ba = a + (Math.random() - 0.5) * 1.2;
+        const blen = len * 0.4 * ratio;
+        g.moveTo(Math.cos(a) * len * 0.5, Math.sin(a) * len * 0.5);
+        g.lineTo(Math.cos(ba) * (len * 0.5 + blen), Math.sin(ba) * (len * 0.5 + blen));
+        g.stroke();
+      }
     }
   }
 
@@ -436,6 +621,11 @@ export class GameUI extends Component {
     }
 
     if (target === 'pet') {
+      // 松手时清除 hold-ready 追踪（不管是否触发了演出，都 reset）
+      this._holdReadyEggId = '';
+      if (this._crackNode) this._crackNode.removeAllChildren();
+      // 演出进行中不再触发 poke / 抚摸
+      if (this._hatchPerforming) return;
       if (this._moved > HIT.SWIPE) return; // 已按抚摸处理
       if (Date.now() - this._pressTs >= 500 && this.heldEgg()) return; // 长按摸蛋
       this.poke();
@@ -661,7 +851,8 @@ export class GameUI extends Component {
     if (!save) return;
     const ready = EggSystem.findReadyEggs(save)[0];
     if (ready) {
-      this.hatch(ready);
+      // T27：ready 蛋需要长按 ≥900ms 才触发破壳演出，短按提示
+      this.showToast('长按蛋壳帮它破壳而出');
       return;
     }
     const pet = Collection.getActivePet(save);
@@ -701,14 +892,217 @@ export class GameUI extends Component {
     if (!save) return;
     const res = EggSystem.hatchEgg(save, egg);
     GameSave.markDirty();
-    this.flashRarity(res.rarity);
     if (res.pet) {
+      // 演出已跑完，这里只处理新宠物的问候台词（celebrate 演出在 runHatchPerformance 里提前跑了）
       const line = PetBehavior.pickGreetingLine(save, res.pet);
-      DialogBubble.show(line);
+      // T27：用"我出来啦！"覆盖默认问候，契合破壳时刻的仪式感
+      DialogBubble.show('我出来啦！');
+      // 然后让宠物用默认台词欢迎玩家
+      this.scheduleOnce(() => DialogBubble.show(line), 1.8);
     } else {
       DialogBubble.show(`重复的灵卵化作 ${res.dupStardust} 星尘`);
     }
     this.refreshHud();
+  }
+
+  /**
+   * T27 破壳演出（所有稀有度都有基础演出；稀有度叠加放射光）
+   * 序列：shake → flash白光 → pieces飞散 → hatch → petView celebrate → 星尘粒子 → 台词
+   * 演出结束才调 EggSystem.hatchEgg（离线补演出：离线到点的蛋保持 ready 状态等玩家长按）
+   */
+  private runHatchPerformance(egg: import('../core/SaveData').EggState): void {
+    if (this._hatchPerforming) return;
+    this._hatchPerforming = true;
+    const save = GameSave.data;
+    if (!save) { this._hatchPerforming = false; return; }
+
+    // 从蛋内物种取稀有度（破壳揭晓时刻）
+    const rfinal: Rarity = getSpecies(egg.speciesId)?.rarity ?? Rarity.Common;
+
+    // 演出开始 → 裂纹层先隐藏（pieces 会代替它）
+    if (this._crackNode) this._crackNode.active = false;
+
+    // ① shake：2D 灵卵 ±8° 抖动 6 次（总计 ~0.48s）
+    const overlay = this._eggOverlay;
+    const doShake = () => {
+      if (!overlay) return;
+      tween(overlay)
+        .by(0.08, { eulerAngles: new Vec3(0, 0, 8) })
+        .by(0.08, { eulerAngles: new Vec3(0, 0, -16) })
+        .by(0.08, { eulerAngles: new Vec3(0, 0, 16) })
+        .by(0.08, { eulerAngles: new Vec3(0, 0, -16) })
+        .by(0.08, { eulerAngles: new Vec3(0, 0, 16) })
+        .by(0.08, { eulerAngles: new Vec3(0, 0, -8) })
+        .to(0.05, { eulerAngles: new Vec3(0, 0, 0) })
+        .start();
+    };
+
+    // ② flash：全屏白光（opacity 220→0，0.35s）
+    const doFlash = () => {
+      const flash = new Node('HatchFlash');
+      flash.layer = Layers.Enum.UI_2D;
+      flash.setParent(this.node!);
+      flash.setPosition(0, 0, 0);
+      const tf = flash.addComponent(UIOpacity);
+      tf.opacity = 235;
+      const w = this._w, h = this._h;
+      const g = flash.addComponent(Graphics);
+      g.fillColor = new Color(255, 255, 255, 255);
+      g.rect(-w / 2, -h / 2, w, h);
+      g.fill();
+      tween(tf).to(0.35, { opacity: 0 }).call(() => flash.destroy()).start();
+    };
+
+    // ③ pieces：4 片蛋壳从中心向外飞 + 淡出（0.8s）
+    const doPieces = () => {
+      if (!overlay) return;
+      const parts: Node[] = [];
+      for (let i = 0; i < 6; i++) {
+        const p = new Node('Piece' + i);
+        p.layer = Layers.Enum.UI_2D;
+        p.setParent(overlay);
+        const op = p.addComponent(UIOpacity);
+        op.opacity = 255;
+        const g = p.addComponent(Graphics);
+        g.fillColor = new Color(230, 200, 150, 255);
+        g.strokeColor = new Color(120, 80, 40, 200);
+        g.lineWidth = 1.5;
+        // 画一片蛋壳碎块（扇形）
+        g.moveTo(0, 0);
+        g.lineTo(18 + Math.random() * 10, -8 + Math.random() * 16);
+        g.lineTo(-4 + Math.random() * 10, 22 + Math.random() * 8);
+        g.close();
+        g.fill();
+        g.stroke();
+        parts.push(p);
+      }
+      parts.forEach((p, i) => {
+        const a = (i / parts.length) * Math.PI * 2 + Math.random() * 0.5;
+        const dist = 80 + Math.random() * 60;
+        tween(p)
+          .to(0.75, {
+            position: new Vec3(Math.cos(a) * dist, Math.sin(a) * dist + 20, 0),
+            eulerAngles: new Vec3(0, 0, (Math.random() - 0.5) * 360),
+          })
+          .start();
+        const op = p.getComponent(UIOpacity);
+        if (op) tween(op).delay(0.35).to(0.4, { opacity: 0 }).call(() => p.destroy()).start();
+      });
+      // 同时把灵卵本体也放大消失（0.4s）
+      const op = overlay.addComponent(UIOpacity);
+      op.opacity = 255;
+      tween(overlay)
+        .to(0.4, { scale: new Vec3(0.75, 0.75, 1) })
+        .start();
+      tween(op)
+        .delay(0.15)
+        .to(0.25, { opacity: 0 })
+        .call(() => {
+          overlay.active = false;
+          this._crackNode?.destroy();
+          this._crackNode = null;
+        })
+        .start();
+    };
+
+    // ④ 稀有度放射光（从蛋位置向外扩散，≥1.5s，Common 无）
+    const doBeam = () => {
+      const key = (rfinal.charAt(0).toUpperCase() + rfinal.slice(1)) as keyof typeof GameConfig.RARITY_FX;
+      const hex = (GameConfig.RARITY_FX as Record<string, string | null>)[key];
+      if (!hex) return; // Common 无放射光，跳过
+      const color = new Color();
+      Color.fromHEX(color, hex);
+      const save2 = GameSave.data;
+      const petView = this._petView;
+      if (!this._cam || !petView) return;
+      const wp = petView.displayWorldPos;
+      const ui = SceneAnchors.worldToUi(this._cam, wp);
+
+      const beam = new Node('HatchBeam');
+      beam.layer = Layers.Enum.UI_2D;
+      beam.setParent(this.node!);
+      beam.setPosition(ui.x, ui.y + 22, 0);
+      const op = beam.addComponent(UIOpacity);
+      op.opacity = 255;
+      const g = beam.addComponent(Graphics);
+      // 画放射光（8 道光柱从中心向外）
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const len = 220;
+        g.fillColor = new Color(color.r, color.g, color.b, 180);
+        g.moveTo(Math.cos(a - 0.12) * 16, Math.sin(a - 0.12) * 16);
+        g.lineTo(Math.cos(a) * len, Math.sin(a) * len);
+        g.lineTo(Math.cos(a + 0.12) * 16, Math.sin(a + 0.12) * 16);
+        g.close();
+        g.fill();
+      }
+      // 中心光球
+      g.fillColor = new Color(color.r, color.g, color.b, 255);
+      g.circle(0, 0, 22);
+      g.fill();
+      const whiteOp = new Node('BeamWhite');
+      whiteOp.layer = Layers.Enum.UI_2D;
+      whiteOp.setParent(beam);
+      const wOp = whiteOp.addComponent(UIOpacity);
+      wOp.opacity = 255;
+      const wg = whiteOp.addComponent(Graphics);
+      wg.fillColor = new Color(255, 255, 255, 230);
+      wg.circle(0, 0, 14);
+      wg.fill();
+
+      tween(beam)
+        .to(1.5, { scale: new Vec3(1.6, 1.6, 1) })
+        .start();
+      tween(op).delay(0.8).to(0.7, { opacity: 0 }).call(() => beam.destroy()).start();
+      tween(wOp).to(0.5, { opacity: 0 }).start();
+    };
+
+    // ⑤ starDust：18 颗星尘粒子从蛋位置向外飞 + 淡出
+    const doStardust = () => {
+      if (!this._cam || !this._petView) return;
+      const wp = this._petView.displayWorldPos;
+      const ui = SceneAnchors.worldToUi(this._cam, wp);
+      for (let i = 0; i < 18; i++) {
+        const p = new Node('StarDust' + i);
+        p.layer = Layers.Enum.UI_2D;
+        p.setParent(this.node!);
+        p.setPosition(ui.x + (Math.random() - 0.5) * 40, ui.y + 22 + (Math.random() - 0.5) * 40, 0);
+        const op = p.addComponent(UIOpacity);
+        op.opacity = 200 + Math.random() * 55;
+        const g = p.addComponent(Graphics);
+        g.fillColor = new Color(255, 220, 150, 255);
+        const r = 2 + Math.random() * 2;
+        g.circle(0, 0, r);
+        g.fill();
+        g.fillColor = new Color(255, 255, 255, 255);
+        g.circle(0, 0, r * 0.4);
+        g.fill();
+        const a = Math.random() * Math.PI * 2;
+        const dist = 100 + Math.random() * 140;
+        const dur = 1.2 + Math.random() * 0.6;
+        tween(p).to(dur, {
+          position: new Vec3(p.position.x + Math.cos(a) * dist, p.position.y + Math.sin(a) * dist + 60, 0),
+        }).start();
+        tween(op).delay(0.4 + Math.random() * 0.3).to(dur - 0.4, { opacity: 0 }).call(() => p.destroy()).start();
+      }
+    };
+
+    // 序列：shake(0.48s) → flash → pieces+beam+starDust 同时 → hatch → celebrate
+    doShake();
+    this.scheduleOnce(() => doFlash(), 0.44);
+    this.scheduleOnce(() => {
+      doPieces();
+      doBeam();
+      doStardust();
+      // 演出中段才 hatch：这样 PetView 换模型时用户正看着 pieces 飞散，3D 幼崽自然登场
+      const saveNow = GameSave.data;
+      if (saveNow) this.hatch(egg);
+    }, 0.52);
+    this.scheduleOnce(() => {
+      // hatch 完 PetView 刷新模型后，给 0.3s 让新模型加载 → celebrate 演出
+      this._petView?.playReaction('celebrate', 1.4);
+      this._hatchPerforming = false;
+    }, 0.95);
   }
 
   private say(text: string): void {
@@ -720,6 +1114,16 @@ export class GameUI extends Component {
   private buildHud(): void {
     const w = this._w;
     const h = this._h;
+
+    // T25：软垫（窝）造型 Graphics —— 挂在 UI_2D 层，每帧把 HOME 世界位置投影过来画
+    const eggPad = uiNode('EggPad', 400, 300);
+    eggPad.setParent(this.node);
+    this._eggG = eggPad.addComponent(Graphics);
+
+    // T25：2D 灵卵叠加层 —— 覆盖 3D 灰圆（UI_2D 永远在上）
+    this._eggOverlay = uiNode('EggOverlay', 260, 280);
+    this._eggOverlay.setParent(this.node);
+    this._eggOverlay.active = false;
 
     // 顶栏：食物 / 星尘 / 图鉴
     const foodPill = panel('FoodPill', 170, 64, UI.BG, 32);
@@ -747,10 +1151,9 @@ export class GameUI extends Component {
     dishIcon.setParent(dish);
     dishIcon.setPosition(0, 0, 0);
 
-    // 孵化倒计时
+    // 孵化倒计时 —— 位置跟随蛋（由 updateEggPill 动态 setPosition）
     this._eggPill = panel('EggPill', 360, 96, UI.BG, 20);
     this._eggPill.setParent(this.node);
-    this._eggPill.setPosition(0, -h / 2 + 240);
     this._eggText = this.addLabelInside(this._eggPill, '', 22, UI.TEXT, 340, 40);
     this._eggText.node.setPosition(0, 18, 0);
     this._eggTf = uiNode('EggBar', 300, 14);

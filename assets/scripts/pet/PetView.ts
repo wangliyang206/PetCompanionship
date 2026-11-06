@@ -211,7 +211,12 @@ export class PetView extends Component {
       const mr = node.addComponent(MeshRenderer);
       mr.mesh = mesh;
       const mat = makePlainMaterial(themeHex);
-      if (mat) mr.material = mat;
+      if (mat) {
+        // 覆盖所有 subMesh 材质（GLB 内嵌的 materials 数组可能有多元素，mr.material 只替换 index 0）
+        const count = (mr.materials?.length ?? 0) || 1;
+        const allMat = new Array(count).fill(mat);
+        mr.materials = allMat;
+      }
       this._model = node;
       this.fitModel(node, mesh, TARGET_HEIGHT[this._stage]);
       this.applyBehavior();
@@ -438,18 +443,20 @@ export class PetView extends Component {
     }, hold);
   }
 
-  /** 失落变灰（材质属性名不同版本有差异，失败不影响表现） */
+  /** 失落变灰：所有 subMesh 全部覆色 */
   private tint(root: Node, color: Color): void {
     for (const r of root.getComponentsInChildren(MeshRenderer)) {
       try {
-        const mat = r.material;
-        if (mat) {
-          mat.setProperty('albedo', color);
-          mat.setProperty('mainColor', color);
+        const count = r.materials?.length ?? 1;
+        for (let i = 0; i < count; i++) {
+          const mat = r.materials[i];
+          if (!mat) continue;
+          try { mat.setProperty('albedo', color); } catch (_) { /* no-op */ }
+          try { mat.setProperty('mainColor', color); } catch (_) { /* no-op */ }
+          try { mat.setProperty('baseColor', color); } catch (_) { /* no-op */ }
+          try { mat.setProperty('diffuse', color); } catch (_) { /* no-op */ }
         }
-      } catch (e) {
-        // ignore
-      }
+      } catch (e) { /* ignore */ }
     }
   }
 }
