@@ -33,8 +33,9 @@ import { MissYouService } from '../core/MissYouService';
 import { DebugTools } from '../core/DebugTools';
 import { TimeService } from '../core/TimeService';
 import { getSpecies } from '../pet/PetDefs';
+import { PetState } from '../core/SaveData';
 import { UI, button, circle, label, panel, uiNode } from './UiFactory';
-import { EGG_STYLES, createEggNode, createEggPedestal, drawNestFront, drawNestPad, hashId } from './EggArt';
+import { EGG_STYLES, createEggNode, createEggPedestal, drawNestFront, drawNestPad, drawRevealCard, hashId } from './EggArt';
 import { createOnboardingBackdrop } from './OnboardingBackdrop';
 
 const { ccclass } = _decorator;
@@ -91,10 +92,10 @@ export class GameUI extends Component {
   private _nestFrontG: Graphics | null = null;
   private _eggBarAtEgg = false;                  // 倒计时条是否跟随蛋位置
 
-  // T27：长按 ready 蛋 → 破壳演出
-  private _holdReadyEggId = '';
-  private _holdReadyStartTs = 0;
+  // T28：点按 ready 蛋 → 破壳演出 → 「恭喜获得」宠物卡片
   private _hatchPerforming = false;
+  private _reveal: Node | null = null;          // 恭喜卡片（模态，轻触关闭）
+  private _pendingGreet = '';                    // 卡片关掉后再说的第一句问候
 
   private _toastTimer = 0;
   private _bubbleTimer = 0;
@@ -341,34 +342,14 @@ export class GameUI extends Component {
     this._bubble.setPosition(x, y, 0);
   }
 
-  /** 长按蛋：incubating 每 450ms 减 2 分钟；ready 累积 900ms → 触发破壳演出 */
+  /** 长按孵化中的蛋：每 450ms 减 2 分钟（ready 蛋改为点按直接破壳，见 T28） */
   private updateHold(): void {
     if (this._target !== 'pet' || this._moved > HIT.TAP) return;
     if (this._hatchPerforming) return; // 演出进行中，忽略触摸
     const save = GameSave.data;
     if (!save) return;
 
-    const ready = EggSystem.findReadyEggs(save)[0];
     const incubating = PokePlay.getIncubatingEgg(save);
-
-    // ready 蛋：长按累积 → 破壳演出（不需要等 onTouchEnd）
-    if (ready) {
-      if (this._holdReadyEggId !== ready.id) {
-        this._holdReadyEggId = ready.id;
-        this._holdReadyStartTs = Date.now();
-      }
-      const held = Date.now() - this._holdReadyStartTs;
-      // 给 2D 灵卵加裂纹进度反馈
-      if (this._eggOverlay && this._holdReadyEggId) {
-        const ratio = Math.min(1, held / 900);
-        this.drawHatchCrack(ratio);
-      }
-      if (held >= 900) {
-        this._holdReadyEggId = '';
-        this.runHatchPerformance(ready);
-      }
-      return;
-    }
 
     // incubating 蛋：每 0.5s 缩短 2 分钟
     if (incubating) {
@@ -380,39 +361,6 @@ export class GameUI extends Component {
       if (reduce > 0) {
         this.showToast(`蛋壳震了一下（-${reduce / 60_000} 分钟）`);
         GameSave.markDirty();
-      }
-    }
-  }
-
-  /** 在 2D 灵卵上画裂纹（破壳演出前的进度反馈） */
-  private _crackNode: Node | null = null;
-  private drawHatchCrack(ratio: number): void {
-    if (!this._eggOverlay) return;
-    // 懒创建：裂纹子节点只建一次
-    if (!this._crackNode) {
-      this._crackNode = new Node('EggCrack');
-      this._crackNode.layer = Layers.Enum.UI_2D;
-      this._crackNode.setParent(this._eggOverlay);
-    }
-    const g = this._crackNode.getComponent(Graphics) ?? this._crackNode.addComponent(Graphics);
-    g.clear();
-    g.lineWidth = 2.4;
-    g.strokeColor = new Color(60, 30, 10, Math.round(180 * ratio));
-    // 5 条从中心向外放射的裂纹，每条约 80px 长，按 ratio 截断
-    const segs = 5;
-    const len = 78 * ratio;
-    for (let i = 0; i < segs; i++) {
-      const a = (-Math.PI * 0.5) + (i / segs) * Math.PI + (Math.random() - 0.5) * 0.4;
-      g.moveTo(0, 0);
-      g.lineTo(Math.cos(a) * len, Math.sin(a) * len);
-      g.stroke();
-      // 小分支
-      if (ratio > 0.4) {
-        const ba = a + (Math.random() - 0.5) * 1.2;
-        const blen = len * 0.4 * ratio;
-        g.moveTo(Math.cos(a) * len * 0.5, Math.sin(a) * len * 0.5);
-        g.lineTo(Math.cos(ba) * (len * 0.5 + blen), Math.sin(ba) * (len * 0.5 + blen));
-        g.stroke();
       }
     }
   }
@@ -486,6 +434,12 @@ export class GameUI extends Component {
 
   private onTouchStart = (e: EventTouch): void => {
     const { x, y } = this.toLocal(e);
+
+    // 恭喜卡片是模态：任意一点关闭，不透传给场景
+    if (this._reveal && this._reveal.active) {
+      this.closeReveal();
+      return;
+    }
     this._startX = x;
     this._startY = y;
     this._downX = x;
@@ -600,9 +554,6 @@ export class GameUI extends Component {
     }
 
     if (target === 'pet') {
-      // 松手时清除 hold-ready 追踪（不管是否触发了演出，都 reset）
-      this._holdReadyEggId = '';
-      if (this._crackNode) this._crackNode.removeAllChildren();
       // 演出进行中不再触发 poke / 抚摸
       if (this._hatchPerforming) return;
       if (this._moved > HIT.SWIPE) return; // 已按抚摸处理
@@ -830,8 +781,8 @@ export class GameUI extends Component {
     if (!save) return;
     const ready = EggSystem.findReadyEggs(save)[0];
     if (ready) {
-      // T27：ready 蛋需要长按 ≥900ms 才触发破壳演出，短按提示
-      this.showToast('长按蛋壳帮它破壳而出');
+      // T28：点一下就破壳，不再要求长按（长按门槛实测挫败感强）
+      this.runHatchPerformance(ready);
       return;
     }
     const pet = Collection.getActivePet(save);
@@ -872,12 +823,15 @@ export class GameUI extends Component {
     const res = EggSystem.hatchEgg(save, egg);
     GameSave.markDirty();
     if (res.pet) {
+      const pet = res.pet;
       // 演出已跑完，这里只处理新宠物的问候台词（celebrate 演出在 runHatchPerformance 里提前跑了）
-      const line = PetBehavior.pickGreetingLine(save, res.pet);
+      const line = PetBehavior.pickGreetingLine(save, pet);
       // T27：用"我出来啦！"覆盖默认问候，契合破壳时刻的仪式感
       DialogBubble.show('我出来啦！');
-      // 然后让宠物用默认台词欢迎玩家
-      this.scheduleOnce(() => DialogBubble.show(line), 1.8);
+      // 问候不抢在卡片之前说：等卡片关掉再开口
+      this._pendingGreet = line;
+      // T28：庆祝演出结束后弹出「恭喜获得」卡片（先让演出亮完）
+      this.scheduleOnce(() => this.showRevealCard(pet), 1.6);
     } else {
       DialogBubble.show(`重复的灵卵化作 ${res.dupStardust} 星尘`);
     }
@@ -897,9 +851,6 @@ export class GameUI extends Component {
 
     // 从蛋内物种取稀有度（破壳揭晓时刻）
     const rfinal: Rarity = getSpecies(egg.speciesId)?.rarity ?? Rarity.Common;
-
-    // 演出开始 → 裂纹层先隐藏（pieces 会代替它）
-    if (this._crackNode) this._crackNode.active = false;
 
     // ① shake：2D 灵卵 ±8° 抖动 6 次（总计 ~0.48s）
     const overlay = this._eggOverlay;
@@ -976,11 +927,7 @@ export class GameUI extends Component {
       tween(op)
         .delay(0.15)
         .to(0.25, { opacity: 0 })
-        .call(() => {
-          overlay.active = false;
-          this._crackNode?.destroy();
-          this._crackNode = null;
-        })
+        .call(() => { overlay.active = false; })
         .start();
     };
 
@@ -1082,6 +1029,123 @@ export class GameUI extends Component {
       this._petView?.playReaction('celebrate', 1.4);
       this._hatchPerforming = false;
     }, 0.95);
+  }
+
+  // ===== T28：破壳后的「恭喜获得」宠物卡片 =====
+
+  private static readonly RARITY_LABEL: Record<string, string> = {
+    common: '普通', rare: '稀有', epic: '史诗', legend: '传说',
+  };
+  private static readonly XI_LABEL: Record<string, string> = {
+    mao: '毛虫系', yu: '羽虫系', lin: '鳞虫系', jie: '介虫系', luo: '倮虫系',
+  };
+
+  /** 破壳揭晓：弹出「恭喜获得 ✕✕」卡片（模态，轻触任意处关闭） */
+  private showRevealCard(pet: PetState): void {
+    if (this._reveal || !this._w) return;
+    const species = getSpecies(pet.speciesId);
+    if (!species) return;
+    const w = this._w;
+    const h = this._h;
+
+    const root = uiNode('Reveal', w, h);
+    root.setParent(this.node);
+    root.setPosition(0, 0, 0);
+    const rootOp = root.addComponent(UIOpacity);
+    rootOp.opacity = 255;
+    this._reveal = root;
+
+    // 半透遮罩（渐入）
+    const mask = panel('RevealMask', w, h, UI.MASK, 0);
+    mask.setParent(root);
+    const mOp = mask.addComponent(UIOpacity);
+    mOp.opacity = 0;
+    tween(mOp).to(0.25, { opacity: 255 }).start();
+
+    // 稀有度主题色（RARITY_FX 里 Common 为 null → 用暖金兜底）
+    const cap = species.rarity.charAt(0).toUpperCase() + species.rarity.slice(1);
+    const fxHex = (GameConfig.RARITY_FX as Record<string, string | null>)[cap] ?? '#D9A066';
+    const rarColor = new Color();
+    Color.fromHEX(rarColor, fxHex);
+    const theme = new Color();
+    Color.fromHEX(theme, species.themeColor);
+
+    // 卡片本体
+    const card = uiNode('RevealCard', 560, 660);
+    card.setParent(root);
+    card.setPosition(0, 20, 0);
+    card.setScale(0.55, 0.55, 1);
+    const g = card.addComponent(Graphics);
+    drawRevealCard(g, { rar: rarColor, theme });
+
+    // 标题 / 名字 / 标签 / 台词 / 装饰 / 提示
+    const title = label('RevealTitle', '恭 喜 获 得 新 伙 伴', 30, new Color(255, 250, 240, 255), 500, 40);
+    title.setParent(card);
+    title.setPosition(0, 286);
+
+    const name = label('RevealName', `「${species.name}」`, 56, UI.TEXT, 500, 76);
+    name.setParent(card);
+    name.setPosition(0, 168);
+
+    // 标签底由 drawRevealCard 画，这里只放文字；文字用压深一档的同色系（纯稀有度色放在浅底上对比不足）
+    const deepRar = new Color(Math.round(rarColor.r * 0.72), Math.round(rarColor.g * 0.72), Math.round(rarColor.b * 0.72), 255);
+    const deepTheme = new Color(Math.round(theme.r * 0.62), Math.round(theme.g * 0.62), Math.round(theme.b * 0.62), 255);
+    const rarLabel = label('RevealRar', GameUI.RARITY_LABEL[species.rarity] ?? '', 24, deepRar, 160, 54);
+    rarLabel.setParent(card);
+    rarLabel.setPosition(-116, 89);
+    const xiLabel = label('RevealXi', GameUI.XI_LABEL[species.xi] ?? '', 24, deepTheme, 160, 54);
+    xiLabel.setParent(card);
+    xiLabel.setPosition(116, 89);
+
+    // 初见台词：从它的开心台词里挑一句
+    const quotes = species.lines.happy;
+    const quote = quotes.length ? quotes[Math.floor(Math.random() * quotes.length)] : '……';
+    const quoteLb = label('RevealQuote', `「${quote}」`, 24, UI.TEXT_LIGHT, 480, 60);
+    quoteLb.setParent(card);
+    quoteLb.setPosition(0, -108);
+
+    // 分隔装饰：细线 + 菱形
+    g.lineWidth = 1;
+    g.strokeColor = new Color(255, 217, 168, 70);
+    g.moveTo(-150, -108); g.lineTo(-26, -108); g.stroke();
+    g.moveTo(26, -108); g.lineTo(150, -108); g.stroke();
+    g.fillColor = new Color(255, 217, 168, 130);
+    g.moveTo(-26, -103); g.lineTo(-21, -108); g.lineTo(-26, -113); g.lineTo(-31, -108); g.close(); g.fill();
+    g.moveTo(26, -103); g.lineTo(31, -108); g.lineTo(26, -113); g.lineTo(21, -108); g.close(); g.fill();
+
+    const nth = GameSave.data?.pets.length ?? 1;
+    const home = label('RevealHome', `它是你收养的第 ${nth} 位伙伴`, 21, UI.TEXT_LIGHT, 400, 32);
+    home.setParent(card);
+    home.setPosition(0, -212);
+
+    const hint = label('RevealHint', '轻 触 任 意 处 继 续', 16, new Color(150, 132, 112, 130), 400, 28);
+    hint.setParent(card);
+    hint.setPosition(0, -282);
+
+    // 入场：遮罩渐入 + 卡片回弹放大
+    const cOp = card.addComponent(UIOpacity);
+    cOp.opacity = 0;
+    tween(cOp).to(0.2, { opacity: 255 }).start();
+    tween(card).to(0.35, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' }).start();
+
+  }
+
+  private closeReveal(): void {
+    const r = this._reveal;
+    if (!r) return;
+    this._reveal = null;
+    const op = r.getComponent(UIOpacity);
+    if (op) {
+      tween(op).to(0.16, { opacity: 0 }).call(() => r.destroy()).start();
+    } else {
+      r.destroy();
+    }
+    // 卡片关掉，宠物才开口（否则台词会被卡片遮住）
+    if (this._pendingGreet) {
+      const line = this._pendingGreet;
+      this._pendingGreet = '';
+      this.scheduleOnce(() => DialogBubble.show(line), 0.25);
+    }
   }
 
   private say(text: string): void {

@@ -354,6 +354,91 @@ function drawSparks(g: Graphics, id: string, st: EggStyle): void {
 
 // ===== 对外：窝（软垫） =====
 
+// ===== 对外：破壳「恭喜获得」卡片的 Graphics 部分（标签由 GameUI 叠加） =====
+
+/** 恭喜卡配色：稀有度色 + 物种主题色 */
+export interface RevealCardStyle {
+  rar: Color;
+  theme: Color;
+}
+
+/**
+ * 恭喜卡（560×660，原点在卡中心）：稀有度三层外发光 + 奶油面板 + 同色描边
+ * + 顶部稀有度绶带 + 标签底 + 分隔装饰。文字不在这里画。
+ */
+export function drawRevealCard(g: Graphics, st: RevealCardStyle): void {
+  const rar = st.rar;
+  const theme = st.theme;
+  /** 压深一档：稀有度色直接平涂会太刺眼（紫/金尤其），绶带和文字用它 */
+  const deep = (c: Color, k: number): Color =>
+    new Color(Math.round(c.r * k), Math.round(c.g * k), Math.round(c.b * k), 255);
+
+  // 稀有度光晕：三层外发光
+  for (let i = 0; i < 3; i++) {
+    const pad = 14 + i * 9;
+    g.fillColor = new Color(rar.r, rar.g, rar.b, 26 - i * 6);
+    g.roundRect(-280 - pad, -330 - pad, 560 + pad * 2, 660 + pad * 2, 30 + pad);
+    g.fill();
+  }
+  // 面板本体 + 同色描边
+  g.fillColor = col('#FFF6E8', 255);
+  g.roundRect(-280, -330, 560, 660, 28);
+  g.fill();
+  g.lineWidth = 3;
+  g.strokeColor = new Color(rar.r, rar.g, rar.b, 210);
+  g.roundRect(-280, -330, 560, 660, 28);
+  g.stroke();
+
+  // 顶部稀有度绶带（上圆角与卡片对齐，下缘压平；色压深一档，白字才清楚）
+  const rb = deep(rar, 0.74);
+  g.fillColor = rb;
+  g.roundRect(-280, 242, 560, 88, 28);
+  g.fill();
+  g.rect(-280, 242, 560, 44);
+  g.fill();
+  // 绶带下缘一道细高光，把「缎带」和「纸面」分开
+  g.lineWidth = 2;
+  g.strokeColor = new Color(255, 255, 255, 60);
+  g.moveTo(-252, 241); g.lineTo(252, 241); g.stroke();
+
+  // 标签底：稀有度（左）+ 系别（右）
+  g.fillColor = new Color(rar.r, rar.g, rar.b, 34);
+  g.roundRect(-196, 62, 160, 54, 27);
+  g.fill();
+  g.fillColor = new Color(theme.r, theme.g, theme.b, 40);
+  g.roundRect(36, 62, 160, 54, 27);
+  g.fill();
+
+  // 系徽：圆章 + 一圈符文点 + 四芒星（填住卡面中部，避免「一张纸中间一块空」）
+  const cy = -20;
+  g.fillColor = new Color(theme.r, theme.g, theme.b, 26);
+  g.circle(0, cy, 54);
+  g.fill();
+  g.lineWidth = 2;
+  g.strokeColor = new Color(rar.r, rar.g, rar.b, 120);
+  g.circle(0, cy, 54);
+  g.stroke();
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
+    g.fillColor = new Color(rar.r, rar.g, rar.b, 150);
+    g.circle(Math.cos(a) * 54, cy + Math.sin(a) * 54, 2.4);
+    g.fill();
+  }
+  g.fillColor = new Color(theme.r, theme.g, theme.b, 42);
+  g.circle(0, cy, 40);
+  g.fill();
+  star4(g, 0, cy, 28, '#FFF6E0', 250);
+
+  // 分隔装饰：细线 + 双菱形
+  g.lineWidth = 1;
+  g.strokeColor = col('#FFD9A8', 70);
+  g.moveTo(-150, -168); g.lineTo(-26, -168); g.stroke();
+  g.moveTo(26, -168); g.lineTo(150, -168); g.stroke();
+  g.fillColor = col('#FFD9A8', 130);
+  g.moveTo(-26, -163); g.lineTo(-21, -168); g.lineTo(-26, -173); g.lineTo(-31, -168); g.close(); g.fill();
+  g.moveTo(26, -163); g.lineTo(31, -168); g.lineTo(26, -173); g.lineTo(21, -168); g.close(); g.fill();
+}
+
 /** 月牙填充：外椭圆下弧 + 内椭圆回程，用于「窝的前唇」这种双弧夹出来的带子 */
 function crescent(g: Graphics, o: number[], i: number[], c: Color, seg = 40): void {
   g.fillColor = c;
