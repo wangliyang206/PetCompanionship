@@ -336,13 +336,18 @@ export class GameUI extends Component {
       return;
     }
     const pet = Collection.getActivePet(save);
-    if (!pet) {
-      this.showToast('窝里还空着');
+    if (pet) {
+      PokePlay.poke(save, pet);
+      GameSave.markDirty();
+      this.say(PetBehavior.pickInteractLine(save, pet, 'play'));
       return;
     }
-    PokePlay.poke(save, pet);
-    GameSave.markDirty();
-    this.say(PetBehavior.pickInteractLine(save, pet, 'play'));
+    // 窝里没有宠物但有待孵的蛋：轻拍蛋壳，提示长按加速（不泄露物种/稀有度）
+    if (PokePlay.getIncubatingEgg(save)) {
+      this.showToast('蛋壳里有动静，长按可以帮它一把');
+      return;
+    }
+    this.showToast('窝里还空着');
   }
 
   private feed(): void {
