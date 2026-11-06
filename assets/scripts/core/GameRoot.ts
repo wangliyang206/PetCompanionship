@@ -35,6 +35,12 @@ export class GameRoot {
     if (this._booted && this._save) return this._save;
     this._booted = true;
 
+    // 预览调试：URL 加 ?reset=1 时清档重开，便于从新手三选一（第一枚蛋）开始验收
+    if (typeof location !== 'undefined' && /[?&]reset=1/.test(location.search)) {
+      GameSave.delete();
+      console.log('[GameRoot] ?reset=1 已清除存档，从第一枚蛋开始');
+    }
+
     const save = GameSave.load();
 
     // 先挂事件监听，再离线结算：完全体/破壳/探索归来等事件在结算期间发出，
