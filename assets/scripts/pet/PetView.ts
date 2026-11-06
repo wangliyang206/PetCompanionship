@@ -9,7 +9,7 @@
 
 import {
   _decorator, builtinResMgr, Component, EffectAsset, Material, MeshRenderer, Node,
-  Tween, tween, Vec3, resources, Color, Mesh,
+  Tween, tween, Vec3, resources, Color, Mesh, Texture2D,
 } from 'cc';
 import { Behavior, Stage } from '../core/Enums';
 import { Events, EventName } from '../core/Events';
@@ -77,6 +77,91 @@ export function makePlainMaterial(hex: string): Material | null {
   return null;
 }
 
+/**
+ * 模型的 albedo 贴图路径（T30）。
+ * 美术 GLB 内嵌贴图是 4096² × 3 张（albedo / normal / metallic-roughness），
+ * 直接加载在低端机（Mali-T820）会 GL_OUT_OF_MEMORY；但只用纯色又会让宠物变成
+ * 一块没有五官的色块（用户反馈「只有一个轮廓」）。
+ * 折中：构建期把 albedo 降采样到 1024² 单独放进 resources，
+ * 运行时只加载这一张贴图 → 既保住五官/花纹，显存也只有约 1.4MB。
+ *
+ *   models/mao_tuantuan/mao_tuantuan_baby.glb
+ *     → models/mao_tuantuan/baby_albedo
+ */
+export function petAlbedoPath(modelPath: string): string {
+  // 模型路径约定：resources/models/<id>/<id>_<stage>/<id>_<stage>.glb
+  // 贴图和模型同放在 <id> 目录下：models/<id>/<stage>_albedo（不带 resources/ 前缀，
+  // resources.load 的 key 不含 bundle 名）。
+  const m = /^resources\/(.*\/)[^/]+_(egg|baby|adult|final)\/[^/]+\.(?:glb|fbx|obj|prefab)$/i.exec(modelPath);
+  if (!m) return '';
+  return `${m[1]}${m[2].toLowerCase()}_albedo`;
+}
+
+/** 贴图缓存：同一模型被反复加载（切阶段、卡片人像）时不重复解码 */
+const _albedoCache = new Map<string, Texture2D>();
+
+/** 加载宠物 albedo（失败/缺失时回调 null，调用方退回纯色材质） */
+export function loadPetAlbedo(modelPath: string, cb: (tex: Texture2D | null) => void): void {
+  const key = petAlbedoPath(modelPath);
+  if (!key) { cb(null); return; }
+  const hit = _albedoCache.get(key);
+  if (hit && hit.isValid) { cb(hit); return; }
+  // PNG 导入后是 ImageAsset + Texture2D 两个子资源，Texture2D 的子资源名固定为 texture
+  resources.load(`${key}/texture`, Texture2D, (err, tex) => {
+    if (err || !tex) {
+      console.warn('[PetView] albedo 缺失，退回纯色:', `${key}/texture`, err);
+      cb(null);
+      return;
+    }
+    _albedoCache.set(key, tex);
+    cb(tex);
+  });
+}
+
+/**
+ * 宠物材质：有 albedo 就用「unlit + 贴图」（保留美术画好的眼睛/花纹/体积感），
+ * 没有就退回纯色 unlit（至少不是白模）。
+ * 用 unlit 而不是 standard：美术贴图自带明暗与高光，走光照反而会二次压暗，
+ * 且卡片人像用独立渲染纹理，unlit 不受主光方向影响，画面更可控。
+ */
+export function makePetMaterial(hex: string, tex?: Texture2D | null): Material | null {
+  if (tex && tex.isValid) {
+    try {
+      const mat = new Material();
+      mat.initialize({ effectName: 'builtin-unlit', defines: { USE_TEXTURE: true } });
+      if (mat.passes.length > 0) {
+        mat.setProperty('mainTexture', tex);
+        mat.setProperty('mainColor', new Color(255, 255, 255, 255));
+        try { mat.setProperty('useVertexColor', 0); } catch (_) { /* no-op */ }
+        return mat;
+      }
+      console.warn('[PetView] 贴图材质 pass 为空，退回纯色');
+    } catch (e) {
+      console.warn('[PetView] 贴图材质初始化失败:', e);
+    }
+  }
+  return makePlainMaterial(hex);
+}
+
+/**
+ * 美术模型的导出朝向（T30 修正）。
+ * 4 个阶段的 GLB 都是「躺姿」导出的：身体沿 -Z 铺开，脸朝 +Y，
+ * 包围盒 Y 只有 0.8~1.1、Z 有 0.76~1.05 —— 直接放进场景就是一只躺着的宠物，
+ * 侧看只剩一团轮廓（用户反馈「只有一个轮廓」）。
+ * 绕 X 轴 +90° 后：局部 -Z 变世界 +Y（站起来），脸朝 +Z（正对主相机），
+ * 同时与 WanderSystem.faceTarget 的「0° = 朝 +Z」约定一致，走动时不再倒着走。
+ */
+const UPRIGHT_X = 90;
+
+/** 站立姿态下的垂直尺寸与脚底偏移（绕 X +90° 后，局部 z 变成世界 y） */
+export function uprightMetrics(mesh: Mesh): { height: number; foot: number } {
+  const st = mesh?.struct;
+  if (!st?.minPosition || !st?.maxPosition) return { height: 0, foot: 0 };
+  const minZ = st.minPosition.z;
+  const maxZ = st.maxPosition.z;
+  return { height: maxZ - minZ, foot: maxZ };
+}
+
 /** 模型目标高度（世界单位），按阶段微调（卡片人像也用同一套，见 PetPortrait） */
 export const PET_TARGET_HEIGHT: Record<Stage, number> = {
   [Stage.Egg]: 0.75,
@@ -95,6 +180,8 @@ export type PetReaction =
 export class PetView extends Component {
 
   private _model: Node | null = null;
+  /** 模型外层容器（只负责把朝向转正，不让动画把它冲掉） */
+  private _holder: Node | null = null;
   private _loadKey = '';
   private _baseScale = new Vec3(1, 1, 1);
   private _baseY = 0;
@@ -127,7 +214,7 @@ export class PetView extends Component {
     let effectName = '';
     let matColor = '';
     if (this._model) {
-      const r = this._model.getComponent(MeshRenderer);
+      const r = this._model.getComponentInChildren(MeshRenderer);
       const m = r?.material as Material | null | undefined;
       passes = m?.passes?.length ?? 0;
       try { effectName = m?.effectAsset?.name ?? ''; } catch (_) { /* ignore */ }
@@ -216,10 +303,9 @@ export class PetView extends Component {
     this.loadModel(path, themeHex);
   };
 
-  /**
-   * 只加载模型的 Mesh 子资源，材质自建纯色。
+  /** 只加载模型的 Mesh 子资源，材质自建纯色/贴图。
    * 原因：美术 GLB 内嵌 3 张 4096×4096 贴图，真机（Mali-T820）上传时 GL_OUT_OF_MEMORY 直接 SIGSEGV；
-   * 纯色材质既避开贴图解码/上传，也把首次显示体积降到最低（见 docs/06 D11）。
+   * 这里只取 Mesh，材质自己拼（albedo 用构建期降采样的 1024² 版本，见 petAlbedoPath）。
    */
   private loadModel(path: string, themeHex: string): void {
     const key = petMeshKey(path);
@@ -233,8 +319,15 @@ export class PetView extends Component {
         return;
       }
       this.clearModel();
+      // 美术模型是躺姿导出的，见 UPRIGHT_X：用一层 PetStand 承担 +90° 的基准旋转，
+      // 动画仍然跑在无旋转的 holder 上（否则位移/缩放会被旋转坐标系带偏）。
+      const holder = new Node('PetModelHolder');
+      holder.setParent(this.node);
+      const stand = new Node('PetStand');
+      stand.setParent(holder);
+      stand.setRotationFromEuler(UPRIGHT_X, 0, 0);
       const node = new Node('PetModel');
-      node.setParent(this.node);
+      node.setParent(stand);
       const mr = node.addComponent(MeshRenderer);
       mr.mesh = mesh;
       const mat = makePlainMaterial(themeHex);
@@ -244,31 +337,38 @@ export class PetView extends Component {
         const allMat = new Array(count).fill(mat);
         mr.materials = allMat;
       }
-      this._model = node;
+      this._model = holder;
+      this._holder = holder;
       this.applyModelVisibility();
-      this.fitModel(node, mesh, PET_TARGET_HEIGHT[this._stage]);
+      this.fitModel(holder, mesh, PET_TARGET_HEIGHT[this._stage]);
       this.applyBehavior();
+
+      // 贴图是异步的：先上纯色（避免白模），到了再换，玩家几乎看不出中间态
+      loadPetAlbedo(path, (tex) => {
+        if (!tex || this._model !== holder || !node.isValid) return;
+        const texMat = makePetMaterial(themeHex, tex);
+        if (!texMat) return;
+        const count = (mr.materials?.length ?? 0) || 1;
+        mr.materials = new Array(count).fill(texMat);
+      });
     });
   }
 
-  /** 按 Mesh 包围盒归一化高度，并把脚底对齐到 y=0 */
+  /**
+   * 按 Mesh 包围盒归一化高度，并把脚底对齐到 y=0。
+   * 注意模型是躺姿（见 UPRIGHT_X），垂直尺寸取的是局部 Z 跨度；
+   * 绕 X +90° 后世界 y = -z，所以脚底偏移是 maxZ（不是 -minY）。
+   */
   private fitModel(node: Node, mesh: Mesh, targetHeight: number): void {
-    const st = mesh?.struct;
-    if (!st || !st.minPosition || !st.maxPosition) {
+    const { height, foot } = uprightMetrics(mesh);
+    if (height < 0.001) {
       this._baseScale = new Vec3(1, 1, 1);
       this._baseY = 0;
       return;
     }
-    const minY = st.minPosition.y;
-    const sizeY = st.maxPosition.y - minY;
-    if (sizeY < 0.001) {
-      this._baseScale = new Vec3(1, 1, 1);
-      this._baseY = 0;
-      return;
-    }
-    const scale = targetHeight / sizeY;
+    const scale = targetHeight / height;
     node.setScale(scale, scale, scale);
-    const y = -minY * scale;
+    const y = foot * scale;
     node.setPosition(0, y, 0);
     this._baseScale = new Vec3(scale, scale, scale);
     this._baseY = y;
@@ -304,6 +404,10 @@ export class PetView extends Component {
       this._model.destroy();
       this._model = null;
     }
+    if (this._holder && this._holder.isValid) {
+      this._holder.destroy();
+    }
+    this._holder = null;
   }
 
   // ===== 占位动画 =====

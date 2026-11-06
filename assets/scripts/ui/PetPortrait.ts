@@ -20,7 +20,7 @@ import {
 import { PetState } from '../core/SaveData';
 import { getSpecies } from '../pet/PetDefs';
 import { PetViewModel } from '../pet/PetViewModel';
-import { makePlainMaterial, petMeshKey, PET_TARGET_HEIGHT } from '../pet/PetView';
+import { makePlainMaterial, makePetMaterial, loadPetAlbedo, petMeshKey, PET_TARGET_HEIGHT, uprightMetrics } from '../pet/PetView';
 import { REVEAL_STAGE } from './EggArt';
 
 /** RT 边长（像素）。卡片窗口约 264 设计像素，512 足够，显存约 1MB（低端机友好） */
@@ -119,6 +119,8 @@ export class PetPortrait {
       node.layer = Layers.Enum.UI_3D;
       node.setParent(scene);
       node.setPosition(PARK.x, PARK.y, PARK.z);
+      // 模型是躺姿导出的：绕 X +90° 站起来，正面朝 +Z（相机就在 +Z，正好看到脸）
+      node.setRotationFromEuler(90, 0, 0);
 
       const mr = node.addComponent(MeshRenderer);
       mr.mesh = mesh;
@@ -129,15 +131,21 @@ export class PetPortrait {
       }
       this._model = node;
 
-      // 脚底对齐 PARK.y，并归一化到与场景一致的阶段高度
-      const st = mesh.struct;
-      if (st?.minPosition && st?.maxPosition) {
-        const sizeY = st.maxPosition.y - st.minPosition.y;
-        if (sizeY > 0.001) {
-          const s = targetHeight / sizeY;
-          node.setScale(s, s, s);
-          node.setPosition(PARK.x, PARK.y - st.minPosition.y * s, PARK.z);
-        }
+      // 贴图到位后换成「unlit + albedo」，卡片里就有眼睛和花纹了
+      loadPetAlbedo(path, (tex) => {
+        if (!tex || this._disposed || this._model !== node || !node.isValid) return;
+        const texMat = makePetMaterial(themeHex, tex);
+        if (!texMat) return;
+        const count = (mr.materials?.length ?? 0) || 1;
+        mr.materials = new Array(count).fill(texMat);
+      });
+
+      // 脚底对齐 PARK.y，并归一化到与场景一致的阶段高度（躺姿模型的高度取局部 Z 跨度，见 uprightMetrics）
+      const { height, foot } = uprightMetrics(mesh);
+      if (height > 0.001) {
+        const s = targetHeight / height;
+        node.setScale(s, s, s);
+        node.setPosition(PARK.x, PARK.y + foot * s, PARK.z);
       }
 
       // 取景：正交高度 = 模型高 × orthoK（与卡片台座/投影共用同一个系数，见 EggArt.REVEAL_STAGE）
@@ -156,7 +164,9 @@ export class PetPortrait {
 
   /**
    * 逐帧微动：轻微起伏 + 左右摇摆（±6°）。
-   * 纯色 unlit 模型完全静止时会像一张贴纸，动一点就「活」了；幅度压得很小，不做整圈自转。
+   * 完全静止时会像一张贴纸，动一点就「活」了；幅度压得很小，不做整圈自转。
+   * 基准姿态是绕 X +90°（躺姿模型站起来），摆动叠在 Y 轴上——(90, y, 0) 在 YXZ 序下
+   * 正好是「先站起来、再绕竖直轴左右摆」。
    */
   tick(dt: number): void {
     const m = this._model;
@@ -165,7 +175,7 @@ export class PetPortrait {
     const t = this._elapsed;
     const h = this._modelHeight;
     m.setPosition(this._basePos.x, this._basePos.y + Math.sin(t * 1.8) * h * 0.018, this._basePos.z);
-    m.setRotationFromEuler(0, Math.sin(t * 1.1) * 6, 0);
+    m.setRotationFromEuler(90, Math.sin(t * 1.1) * 6, 0);
   }
 
   dispose(): void {
