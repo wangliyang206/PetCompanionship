@@ -10,6 +10,7 @@ import {
   Node, ResolutionPolicy, Scene, UITransform, view,
 } from 'cc';
 import { GameSave } from '../core/GameSave';
+import { GameConfig } from '../core/GameConfig';
 import { makePlainMaterial, PetView } from '../pet/PetView';
 import { WanderSystem } from '../pet/WanderSystem';
 import { SceneAnchors } from './SceneAnchors';
@@ -32,11 +33,11 @@ export class SceneSetup {
     SceneAnchors.ensure(scene);
 
     const anchor = scene.getChildByName('PetAnchor');
-    if (anchor && !anchor.getComponent(PetView)) {
-      anchor.addComponent(PetView);
-    }
-    if (anchor && !anchor.getComponent(WanderSystem)) {
-      anchor.addComponent(WanderSystem);
+    if (anchor) {
+      // PetAnchor 贴到软垫（窝）上：蛋孵化/幼崽都在这里开始
+      anchor.setPosition(GameConfig.SCENE.HOME.x, 0, GameConfig.SCENE.HOME.z);
+      if (!anchor.getComponent(PetView)) anchor.addComponent(PetView);
+      if (!anchor.getComponent(WanderSystem)) anchor.addComponent(WanderSystem);
     }
 
     let canvasNode = scene.getChildByName('Canvas');

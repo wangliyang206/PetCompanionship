@@ -26,9 +26,16 @@ const { ccclass } = _decorator;
  * 注意：真机上 EffectAsset.get('builtin-standard') 可能为 null（内建 effect 未注册），
  * 此时 Material.passes 长度为 0，赋给 MeshRenderer 会触发原生空指针（setSubModelMaterial）。
  * 因此按候选 effect 依次尝试，且 passes 必须 > 0 才返回。
+ *
+ * Creator 3.8.x 各 effect 的主颜色属性名不完全一致：
+ *   builtin-unlit:       mainColor (color)
+ *   builtin-standard:    albedo   (color)
+ *   builtin-phong:       diffuse  (color) / albedoMap (texture)
+ * 这里用 setProperty 遍历三个候选属性，只要有一个生效即可。
  */
 export function makePlainMaterial(hex: string): Material | null {
-  const CANDIDATES = ['builtin-unlit', 'builtin-standard', 'legacy/standard'];
+  const CANDIDATES = ['builtin-unlit', 'builtin-standard', 'builtin-phong'];
+  const COLOR_PROPS = ['mainColor', 'albedo', 'baseColor', 'diffuse'];
   for (const name of CANDIDATES) {
     try {
       if (!EffectAsset.get(name)) continue;
@@ -37,10 +44,20 @@ export function makePlainMaterial(hex: string): Material | null {
       if (mat.passes.length === 0) continue;
       const c = new Color();
       Color.fromHEX(c, hex);
-      mat.setProperty('albedo', c);
-      mat.setProperty('mainColor', c);
-      mat.setProperty('metallic', 0);
-      mat.setProperty('roughness', 0.85);
+      let applied = false;
+      for (const prop of COLOR_PROPS) {
+        try {
+          mat.setProperty(prop, c);
+          applied = true;
+        } catch (_) { /* ignore unknown property */ }
+      }
+      // unlit 需要关掉顶点色覆盖，避免模型自带顶点色把颜色冲掉
+      try { mat.setProperty('useVertexColor', 0); } catch (_) { /* no-op */ }
+      if (!applied) {
+        console.warn('[PetView] effect', name, '没有匹配到颜色属性，passes=', mat.passes.length);
+        continue;
+      }
+      console.log('[PetView] makePlainMaterial →', name, 'color=', hex, 'passes=', mat.passes.length);
       return mat;
     } catch (e) {
       console.warn('[PetView] 材质初始化失败:', name, e);
@@ -73,8 +90,11 @@ export class PetView extends Component {
   private _baseY = 0;
   private _themeColor: Color = new Color(217, 160, 102, 255);
   private _stage: Stage = Stage.Egg;
+  private _dev = false;
+  private _lastDevLog = 0;
 
   onLoad(): void {
+    this._dev = typeof location !== 'undefined' && /[?&]dev=1/.test(location.search);
     Events.on(EventName.ActivePetSwitched, this.onRefresh);
     Events.on(EventName.PetStageChanged, this.onRefresh);
     Events.on(EventName.PetCollected, this.onRefresh);
@@ -83,6 +103,28 @@ export class PetView extends Component {
     Events.on(EventName.EggBrokenShell, this.onRefresh);
     Events.on(EventName.PetBehaviorChanged, this.onBehaviorChanged);
     this.scheduleOnce(this.onRefresh, 0);
+  }
+
+  update(dt: number): void {
+    if (!this._dev) return;
+    const now = Date.now();
+    if (now - this._lastDevLog < 2000) return;
+    this._lastDevLog = now;
+    const wp = this.node.worldPosition;
+    const scale = this.node.scale;
+    const path = this._loadKey;
+    let passes = 0;
+    let effectName = '';
+    let matColor = '';
+    if (this._model) {
+      const r = this._model.getComponent(MeshRenderer);
+      const m = r?.material as Material | null | undefined;
+      passes = m?.passes?.length ?? 0;
+      try { effectName = m?.effectAsset?.name ?? ''; } catch (_) { /* ignore */ }
+      const c = this._themeColor;
+      matColor = `rgb(${c.r},${c.g},${c.b})`;
+    }
+    console.log(`[PetView:dev] stage=${this._stage} wp=(${wp.x.toFixed(2)},${wp.y.toFixed(2)},${wp.z.toFixed(2)}) scale=(${scale.x.toFixed(2)},${scale.y.toFixed(2)},${scale.z.toFixed(2)}) baseY=${this._baseY.toFixed(2)} model=${!!this._model} mat=${effectName} passes=${passes} color=${matColor} mesh=${path}`);
   }
 
   onDestroy(): void {

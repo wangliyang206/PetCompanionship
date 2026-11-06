@@ -76,7 +76,7 @@ export const GameConfig = {
 
   // ===== 小窝锚点（运行时由 SceneSetup 创建空节点，纯移动/落点判定用）=====
   SCENE: {
-    HOME: { x: 0.6, z: 0.8 },           // 与 Main.scene 的 PetAnchor 初始位置一致
+    HOME: { x: -1.2, z: -1.0 },          // 软垫=窝（蛋孵化在此，宠物"回家"也来此）
     DOORWAY: { x: 0.2, z: -2.4 },       // 门口 / 小背包锚点（拖到这里派出探索）
     SLEEP_PAD: { x: -1.2, z: -1.0 },    // 软垫（与场景 Nest 重合）
     FOOD_BOWL: { x: -1.8, z: 1.4 },     // 食盆
