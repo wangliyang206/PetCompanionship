@@ -25,6 +25,7 @@ export class DragPet {
   private _uiPerWorld = { x: 1, y: 1 };
   private _lastDx = 0;
   private _lastDy = 0;
+  private _followStarted = false;
 
   constructor(petView: PetView) {
     this._petView = petView;
@@ -59,6 +60,7 @@ export class DragPet {
     this._uiPerWorld = { x: per.x, y: per.y };
     this._lastDx = 0;
     this._lastDy = 0;
+    this._followStarted = false;
 
     WanderSystem.instance?.pauseForDrag();
     this.anchor.setPosition(this._startWorld.x, GameConfig.DRAG.LIFT_Y, this._startWorld.z);
@@ -77,6 +79,12 @@ export class DragPet {
     wx = Math.max(cfg.WORLD_MIN_X, Math.min(cfg.WORLD_MAX_X, wx));
     wz = Math.max(cfg.WORLD_MIN_Z, Math.min(cfg.WORLD_MAX_Z, wz));
     this.anchor.setPosition(wx, cfg.LIFT_Y, wz);
+
+    // 悬空扑腾：第一次真正移动时切到 follow 摆动
+    if (!this._followStarted && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      this._followStarted = true;
+      this._petView.playReaction('follow', 10);
+    }
 
     // 方向变化较大时补一下摆动（不每帧重启补间）
     if (Math.abs(dx - this._lastDx) > 6 || Math.abs(dy - this._lastDy) > 6) {
