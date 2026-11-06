@@ -9,7 +9,7 @@
 
 import {
   _decorator, Camera, Color, Component, director, EventTouch, Graphics, input,
-  Input, Label, Node, tween, Vec3, view,
+  Input, Label, Node, tween, UIOpacity, Vec3, view,
 } from 'cc';
 import { GameConfig } from '../core/GameConfig';
 import { GameSave } from '../core/GameSave';
@@ -37,6 +37,22 @@ const HIT = {
   SWIPE: 26,
   TAP: 18,
 };
+
+const eggHex = (hex: string, a = 255): Color => {
+  const c = new Color();
+  Color.fromHEX(c, hex);
+  c.a = a;
+  return c;
+};
+
+/** 灵卵配色（5 组等权，纯 Graphics 占位美术，不含稀有度暗示） */
+const EGG_STYLES = [
+  { base: eggHex('#FFF3E2'), edge: eggHex('#D9B98C'), pattern: eggHex('#CEA068', 165), halo: eggHex('#FFD79A') },
+  { base: eggHex('#E4F3F0'), edge: eggHex('#8FBDB2'), pattern: eggHex('#5FA79A', 165), halo: eggHex('#9FE8D8') },
+  { base: eggHex('#FBE7EE'), edge: eggHex('#D69AAE'), pattern: eggHex('#C77490', 165), halo: eggHex('#FFB7CF') },
+  { base: eggHex('#ECE6F8'), edge: eggHex('#A997CE'), pattern: eggHex('#8E74C4', 165), halo: eggHex('#C3A9FF') },
+  { base: eggHex('#E5EEFA'), edge: eggHex('#93AFCF'), pattern: eggHex('#6E93C4', 165), halo: eggHex('#9EC8FF') },
+];
 
 @ccclass('GameUI')
 export class GameUI extends Component {
@@ -540,37 +556,144 @@ export class GameUI extends Component {
     sub.setParent(root);
     sub.setPosition(0, h / 2 - 272);
 
+    // 三张卡各自不同配色（起始色由蛋 id 决定，等权随机、不暗示稀有度）
+    const startStyle = this.hashId(options[0]) % EGG_STYLES.length;
     options.forEach((id, i) => {
       const x = (i - 1) * 220;
       const card = panel('EggCard' + i, 190, 250, UI.CARD, 22);
       card.setParent(root);
       card.setPosition(x, 40);
 
-      const egg = uiNode('EggShape' + i, 120, 150);
-      const g = egg.addComponent(Graphics);
-      g.fillColor = new Color(250, 238, 220, 255);
-      g.ellipse(0, 6, 46, 60);
-      g.fill();
-      g.strokeColor = new Color(210, 186, 158, 255);
-      g.lineWidth = 3;
-      g.ellipse(0, 6, 46, 60);
-      g.stroke();
-      egg.setParent(card);
-      egg.setPosition(0, 32);
-
-      const q = label('Q' + i, '？？？', 26, UI.TEXT_LIGHT, 160, 34);
-      q.setParent(card);
-      q.setPosition(0, -66);
+      this.drawEgg(card, id, i, (startStyle + i) % EGG_STYLES.length);
 
       const tip = label('Tip' + i, '灵卵', 18, UI.TEXT_LIGHT, 160, 26);
       tip.setParent(card);
-      tip.setPosition(0, -96);
+      tip.setPosition(0, -82);
 
       (card as unknown as { __eggId?: string }).__eggId = id;
     });
 
     // 点击热区由 tapOnboarding 处理
     this.showToast('挑一枚带着走的蛋');
+  }
+
+  /**
+   * 画一枚灵卵：随机配色 + 纹路 + 双层光晕 + 呼吸/浮光
+   * 全部由 Graphics 绘制（占位美术，无需贴图）；纹路按蛋 id 稳定生成，同一枚蛋每次都一样
+   */
+  private drawEgg(card: Node, id: string, index: number, styleIndex: number): void {
+    const st = EGG_STYLES[styleIndex];
+    let seed = this.hashId(id);
+    const rnd = (): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
+
+    const egg = uiNode('EggShape' + index, 170, 200);
+    const g = egg.addComponent(Graphics);
+
+    // 仙气：两层柔和光晕（后画的覆盖在前画的上面）
+    g.fillColor = new Color(st.halo.r, st.halo.g, st.halo.b, 26);
+    g.ellipse(0, 6, 70, 84);
+    g.fill();
+    g.fillColor = new Color(st.halo.r, st.halo.g, st.halo.b, 46);
+    g.ellipse(0, 6, 56, 70);
+    g.fill();
+
+    // 蛋体 + 左上高光
+    g.fillColor = st.base;
+    g.ellipse(0, 6, 46, 60);
+    g.fill();
+    g.fillColor = new Color(255, 255, 255, 92);
+    g.ellipse(-15, 30, 15, 22);
+    g.fill();
+
+    // 纹路：0 斑点 / 1 横向珠链 / 2 竖向条纹
+    g.fillColor = st.pattern;
+    const dot = (px: number, py: number, r: number): void => {
+      g.circle(px, py, r);
+      g.fill();
+    };
+    const mode = this.hashId(id + 'p') % 3;
+    if (mode === 0) {
+      const n = 9 + Math.floor(rnd() * 5);
+      for (let i = 0; i < n; i++) {
+        const a = rnd() * Math.PI * 2;
+        const rr = Math.sqrt(rnd()) * 0.8;
+        dot(46 * rr * Math.cos(a), 6 + 60 * rr * Math.sin(a), 2 + rnd() * 3);
+      }
+    } else if (mode === 1) {
+      for (let row = 0; row < 3; row++) {
+        const ry = 6 + (row - 1) * 20;
+        const k = (ry - 6) / 60;
+        const half = 46 * Math.sqrt(Math.max(0, 1 - k * k)) * 0.72;
+        for (let px = -half; px <= half; px += 9) {
+          dot(px, ry + Math.sin(px * 0.22 + row) * 2.2, 2.4);
+        }
+      }
+    } else {
+      for (let col = 0; col < 2; col++) {
+        const cx = col === 0 ? -19 : 19;
+        for (let py = -26; py <= 34; py += 10) {
+          dot(cx + Math.sin(py * 0.18 + col) * 2.5, py, 2.2);
+        }
+      }
+    }
+
+    // 蛋壳描边
+    g.strokeColor = st.edge;
+    g.lineWidth = 3;
+    g.ellipse(0, 6, 46, 60);
+    g.stroke();
+
+    egg.setParent(card);
+    egg.setPosition(0, 32);
+
+    // 呼吸：极轻微缩放
+    tween(egg)
+      .repeatForever(
+        tween(egg)
+          .to(1.8, { scale: new Vec3(1.035, 1.035, 1) })
+          .to(1.8, { scale: new Vec3(1, 1, 1) }),
+      )
+      .start();
+
+    // 浮光：卡片内缓缓上飘、渐隐渐现的小光点
+    for (let k = 0; k < 4; k++) {
+      const sx = -72 + rnd() * 144;
+      const sy = -22 + rnd() * 66;
+      const spark = uiNode(`Spark${index}_${k}`, 12, 12);
+      const sg = spark.addComponent(Graphics);
+      sg.fillColor = new Color(st.halo.r, st.halo.g, st.halo.b, 210);
+      sg.circle(0, 0, 2.5 + rnd() * 1.5);
+      sg.fill();
+      const op = spark.addComponent(UIOpacity);
+      op.opacity = 0;
+      spark.setParent(card);
+      spark.setPosition(sx, sy);
+      tween(spark)
+        .repeatForever(
+          tween(spark)
+            .call(() => spark.setPosition(sx, sy))
+            .to(2.2 + k * 0.3, { position: new Vec3(sx + 6, sy + 42, 0) }),
+        )
+        .start();
+      tween(op)
+        .delay(k * 0.45)
+        .repeatForever(
+          tween(op)
+            .to(0.7, { opacity: 200 })
+            .to(1.4, { opacity: 0 }),
+        )
+        .start();
+    }
+  }
+
+  /** 字符串 → 稳定正整数（用于按蛋 id 生成配色/纹路） */
+  private hashId(s: string): number {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) & 0x7fffffff;
+    return h || 1;
   }
 
   private tapOnboarding(x: number, y: number): void {
