@@ -34,7 +34,7 @@ import { DebugTools } from '../core/DebugTools';
 import { TimeService } from '../core/TimeService';
 import { getSpecies } from '../pet/PetDefs';
 import { UI, button, circle, label, panel, uiNode } from './UiFactory';
-import { EGG_STYLES, createEggNode, createEggPedestal, hashId } from './EggArt';
+import { EGG_STYLES, createEggNode, createEggPedestal, drawNestFront, drawNestPad, hashId } from './EggArt';
 import { createOnboardingBackdrop } from './OnboardingBackdrop';
 
 const { ccclass } = _decorator;
@@ -86,7 +86,9 @@ export class GameUI extends Component {
 
   // T25：孵化场景视觉可读
   private _eggG: Graphics | null = null;        // 软垫 Graphics（环形 + 垫心）
-  private _eggOverlay: Node | null = null;      // 2D 灵卵叠加层（覆盖 3D 灰圆）
+  private _eggOverlay: Node | null = null;      // 2D 灵卵叠加层（覆盖 3D 灰模）
+  private _nestFront: Node | null = null;       // 窝的前唇（画在灵卵之上，把蛋压进窝里）
+  private _nestFrontG: Graphics | null = null;
   private _eggBarAtEgg = false;                  // 倒计时条是否跟随蛋位置
 
   // T27：长按 ready 蛋 → 破壳演出
@@ -242,6 +244,7 @@ export class GameUI extends Component {
     const save = GameSave.data;
     if (!save || !this._cam || !this._petView) {
       this._eggOverlay.active = false;
+      this._petView?.setModelVisible(true);
       return;
     }
     const ready = EggSystem.findReadyEggs(save)[0];
@@ -250,9 +253,12 @@ export class GameUI extends Component {
     if (!egg) {
       this._eggOverlay.active = false;
       this._lastEggId = '';
+      this._petView.setModelVisible(true);
       return;
     }
     this._eggOverlay.active = true;
+    // 2D 灵卵接管画面 → 藏掉 3D 灰模（否则灰模会从灵卵后面露出半圆，像蛋背后贴了块阴影）
+    this._petView.setModelVisible(false);
 
     // 第一次出现这枚蛋时创建 2D 灵卵（有呼吸/星轨/光尘动效，只建一次）
     if (this._lastEggId !== egg.id || this._eggOverlay.children.length === 0) {
@@ -266,7 +272,7 @@ export class GameUI extends Component {
     // 位置 = PetAnchor 世界坐标 → UI 投影（略上浮一点盖 3D 蛋）
     const wp = this._petView.displayWorldPos;
     const ui = SceneAnchors.worldToUi(this._cam, wp);
-    this._eggOverlay.setPosition(ui.x, ui.y + 22, 0);
+    this._eggOverlay.setPosition(ui.x, ui.y + 10, 0);
     // 缩放 0.5 让 2D 灵卵合适地盖在 3D 蛋上方
     this._eggOverlay.setScale(0.5, 0.5, 1);
 
@@ -284,59 +290,32 @@ export class GameUI extends Component {
     }
   }
 
-  /** 软垫造型：在 HOME 世界位置投影处画一个可读的"窝"（环形 + 垫心椭圆 + 暖光） */
+  /** 软垫造型：在 HOME 世界位置投影处画一个可读的"窝"（编织巢，见 EggArt.drawNestPad） */
+  private _padKey = '';
+
   private drawEggPad(): void {
     if (!this._eggG || !this._cam) return;
-    const g = this._eggG;
-    g.clear();
     const home = SceneAnchors.homePosition();
     const ui = SceneAnchors.worldToUi(this._cam, home);
-    g.node.setPosition(ui.x, ui.y - 8, 0);
+    const hasEgg = !!this._eggOverlay?.active;
+    // 巢是静态的：位置/状态没变就不重画（编织纹有近百条描边，每帧重建在低端机上很贵）
+    const key = `${ui.x.toFixed(1)},${ui.y.toFixed(1)},${hasEgg ? 1 : 0}`;
+    if (key === this._padKey) return;
+    this._padKey = key;
 
-    // 阴影层（地面投射）
-    g.fillColor = new Color(80, 56, 30, 55);
-    g.ellipse(0, -6, 108, 26);
-    g.fill();
-    g.fillColor = new Color(80, 56, 30, 28);
-    g.ellipse(0, -6, 146, 34);
-    g.fill();
+    const g = this._eggG;
+    g.clear();
+    g.node.setPosition(ui.x, ui.y - 12, 0);
+    drawNestPad(g);
 
-    // 垫心主体（浅暖棕椭球）
-    g.fillColor = new Color(210, 165, 110, 255);
-    g.ellipse(0, 0, 112, 60);
-    g.fill();
-    g.fillColor = new Color(235, 196, 146, 255);
-    g.ellipse(-2, 6, 104, 52);
-    g.fill();
-    g.fillColor = new Color(255, 226, 186, 210);
-    g.ellipse(-6, 14, 86, 38);
-    g.fill();
-
-    // 外轮廓环形描边（毛线感）
-    g.lineWidth = 4;
-    g.strokeColor = new Color(120, 80, 40, 220);
-    g.ellipse(0, 0, 112, 60);
-    g.stroke();
-    g.lineWidth = 2;
-    g.strokeColor = new Color(155, 110, 60, 180);
-    g.ellipse(-2, 4, 96, 48);
-    g.stroke();
-
-    // 内圈亮边
-    g.lineWidth = 1.4;
-    g.strokeColor = new Color(255, 230, 190, 160);
-    g.ellipse(-4, 10, 72, 32);
-    g.stroke();
-
-    // 窝的绒毛纹理（6 个小圆点）
-    g.fillColor = new Color(140, 100, 60, 160);
-    const tufts = [
-      [-80, 8], [-60, 36], [-10, 46], [50, 40], [80, 10], [70, -30],
-      [-50, -36], [0, -46], [40, -42],
-    ];
-    for (const [tx, ty] of tufts) {
-      g.circle(tx, ty, 4 + Math.abs(tx) * 0.02);
-      g.fill();
+    // 前唇只在有蛋时出现：蛋的下缘要被它压住，蛋才像坐在窝里
+    if (this._nestFront) {
+      this._nestFront.active = hasEgg;
+      this._nestFront.setPosition(ui.x, ui.y - 12, 0);
+      if (this._nestFrontG) {
+        this._nestFrontG.clear();
+        if (hasEgg) drawNestFront(this._nestFrontG);
+      }
     }
   }
 
@@ -1120,10 +1099,16 @@ export class GameUI extends Component {
     eggPad.setParent(this.node);
     this._eggG = eggPad.addComponent(Graphics);
 
-    // T25：2D 灵卵叠加层 —— 覆盖 3D 灰圆（UI_2D 永远在上）
+    // T25：2D 灵卵叠加层 —— 覆盖 3D 灰模（UI_2D 永远在上）
     this._eggOverlay = uiNode('EggOverlay', 260, 280);
     this._eggOverlay.setParent(this.node);
     this._eggOverlay.active = false;
+
+    // T25：窝的前唇 —— 必须排在灵卵之后，压在蛋的下缘上，蛋才像「坐」在窝里
+    this._nestFront = uiNode('NestFront', 400, 300);
+    this._nestFront.setParent(this.node);
+    this._nestFrontG = this._nestFront.addComponent(Graphics);
+    this._nestFront.active = false;
 
     // 顶栏：食物 / 星尘 / 图鉴
     const foodPill = panel('FoodPill', 170, 64, UI.BG, 32);

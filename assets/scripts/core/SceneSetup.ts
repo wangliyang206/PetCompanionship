@@ -6,7 +6,7 @@
  */
 
 import {
-  builtinResMgr, Camera, Canvas, Color, director, Layers, Mesh, MeshRenderer,
+  Camera, Canvas, Color, director, FogInfo, Layers, MeshRenderer,
   Node, ResolutionPolicy, Scene, UITransform, view,
 } from 'cc';
 import { GameSave } from '../core/GameSave';
@@ -51,9 +51,11 @@ export class SceneSetup {
   }
 
   /**
-   * 场景氛围（测试期占位美术）：把默认的灰盒子换成暖色小屋
-   * - 相机清屏色改为奶油色，并关闭默认天空盒（默认天空盒偏灰蓝，画面显得“空壳”）
-   * - 地面/巢换纯色材质，宠物脚下铺一块地毯
+   * 场景氛围（测试期占位美术）：奶油色底 + 一片看不到边的暖色地面
+   * - 相机清屏色奶油色，关掉默认天空盒（偏灰蓝），场景底色与地面同族
+   * - 地面放大到边界完全出画，再用线性雾淡入背景色 → 没有“漂浮小岛”的梯形硬边
+   * - 3D 的窝（Nest）隐藏：窝由 UI 的 2D 软垫绘制，3D 方块会在垫子外围多出一圈“双窝”
+   * - 不再创建后墙 / 地毯：纯色板在奶油底上只会露出直边和色差
    */
   private static styleScene(scene: Scene): void {
     const cam = scene.getChildByName('Main Camera')?.getComponent(Camera);
@@ -66,36 +68,29 @@ export class SceneSetup {
       console.warn('[SceneSetup] 关闭天空盒失败:', e);
     }
 
-    this.paint(scene.getChildByName('Ground'), '#E7D3B7');
-    this.paint(scene.getChildByName('Nest'), '#C89B6C');
-
-    const groundLayer = scene.getChildByName('Ground')?.layer;
-
-    // 后墙：挡住默认天空盒，保证画面底色是暖色（不依赖 skybox 开关是否生效）
-    if (!scene.getChildByName('BackWall')) {
-      const wall = new Node('BackWall');
-      wall.layer = groundLayer ?? wall.layer;
-      wall.setParent(scene);
-      wall.setPosition(0, 3.2, -4.2);
-      const mr = wall.addComponent(MeshRenderer);
-      const box = builtinResMgr.get<Mesh>('box');
-      if (box) mr.mesh = box;
-      const mat = makePlainMaterial('#F7EBDC');
-      if (mat) mr.material = mat;
-      wall.setScale(14, 9, 0.2);
+    // 地面：场景里只有 8×8，镜头能直接看到四条边（截图里那块“灰色梯形阴影”就是它）。
+    // 放大到 40×40 让边缘彻底出画，颜色贴背景色，只留一点点暖色差当“地板”。
+    const ground = scene.getChildByName('Ground');
+    if (ground) {
+      ground.setScale(4, 1, 4);
+      this.paint(ground, '#EFE1CD');
     }
 
-    if (!scene.getChildByName('Rug')) {
-      const rug = new Node('Rug');
-      rug.layer = groundLayer ?? rug.layer;
-      rug.setParent(scene);
-      rug.setPosition(0.5, 0.006, 0.9);
-      const mr = rug.addComponent(MeshRenderer);
-      const box = builtinResMgr.get<Mesh>('box');
-      if (box) mr.mesh = box;
-      const mat = makePlainMaterial('#F3E2CC');
-      if (mat) mr.material = mat;
-      rug.setScale(2.4, 0.012, 2.4);
+    const nest = scene.getChildByName('Nest');
+    if (nest) nest.active = false;
+
+    // 远处的雾：地面在视距内淡入背景色，天然没有地平线硬边
+    try {
+      const fog = scene.globals?.fog;
+      if (fog) {
+        fog.enabled = true;
+        fog.type = FogInfo.FogType.LINEAR;
+        fog.fogColor = new Color(246, 237, 226, 255);
+        fog.fogStart = 12;
+        fog.fogEnd = 34;
+      }
+    } catch (e) {
+      console.warn('[SceneSetup] 开启雾效失败:', e);
     }
   }
 

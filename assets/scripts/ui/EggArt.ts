@@ -352,6 +352,110 @@ function drawSparks(g: Graphics, id: string, st: EggStyle): void {
   }
 }
 
+// ===== 对外：窝（软垫） =====
+
+/** 月牙填充：外椭圆下弧 + 内椭圆回程，用于「窝的前唇」这种双弧夹出来的带子 */
+function crescent(g: Graphics, o: number[], i: number[], c: Color, seg = 40): void {
+  g.fillColor = c;
+  const [ox, oy, orx, ory] = o;
+  const [ix, iy, irx, iry] = i;
+  for (let k = 0; k <= seg; k++) {
+    const a = Math.PI + Math.PI * (k / seg);
+    const x = ox + Math.cos(a) * orx;
+    const y = oy + Math.sin(a) * ory;
+    if (k === 0) g.moveTo(x, y); else g.lineTo(x, y);
+  }
+  for (let k = seg; k >= 0; k--) {
+    const a = Math.PI + Math.PI * (k / seg);
+    g.lineTo(ix + Math.cos(a) * irx, iy + Math.sin(a) * iry);
+  }
+  g.close();
+  g.fill();
+}
+
+/**
+ * 窝的前唇：画在灵卵之上，把蛋的下缘压住 → 蛋「坐在窝里」而不是「摆在盘子中间」。
+ * 与 drawNestPad 使用同一套椭圆参数，调用方必须与软垫同位置。
+ */
+export function drawNestFront(g: Graphics): void {
+  const RX = 104;
+  const RY = 44;
+  const RXC = RX - 30;   // 碗口（= 巢心的外缘，前唇正好补上这段厚度）
+  const RYC = RY - 14;
+
+  crescent(g, [0, 0, RX, RY], [0, 18, RXC, RYC], col('#A2703A', 255));
+  crescent(g, [0, 4, RX - 4, RY - 3], [0, 19, RXC - 3, RYC - 2], col('#CB9A5F', 255));
+  crescent(g, [0, 9, RX - 13, RY - 11], [0, 20, RXC - 8, RYC - 4], col('#DDAF77', 255));
+
+  // 前沿受光（左侧偏亮）+ 右上略暗的收口
+  arc(g, 0, 0, RX - 5, RY - 5, Math.PI * 1.12, Math.PI * 1.55, col('#FFE3B6', 150), 4.5, 18);
+  arc(g, 0, 4, RX - 11, RY - 9, Math.PI * 1.60, Math.PI * 1.90, col('#F3C68C', 95), 3.2, 14);
+
+  // 前唇上的毛线短线
+  const strands: number[][] = [
+    [-96, -6, -84, 2], [-66, -26, -54, -16], [-22, -38, -10, -30],
+    [30, -36, 44, -28], [70, -22, 82, -12], [94, 0, 104, 8],
+  ];
+  for (const s2 of strands) {
+    polyline(g, [[s2[0], s2[1]], [s2[2], s2[3]]], col('#7A4E26', 110), 2.4);
+  }
+}
+
+/**
+ * 2D 编织巢：替代 3D 的 Nest 方块（方块在垫子外围会露出一整圈「双层窝」）。
+ * 以 (0,0) 为巢口中心，占地约 215×120 设计像素；调用方负责定位。
+ * 造型要点：碗口向上偏移 → 前沿比后沿厚，一眼读出「碗」而不是「盘子」；
+ * 外沿一圈短弧当毛线；内腔只做「远端内壁压暗 + 碗底暖光」两层，避免同心圆环带。
+ */
+export function drawNestPad(g: Graphics): void {
+  const RX = 104;
+  const RY = 44;
+
+  // 1) 落地投影
+  ell(g, 0, -26, 134, 22, col('#6B4522', 16));
+  ell(g, 0, -20, 114, 17, col('#5A3A1C', 22));
+  ell(g, 0, -15, 88, 12, col('#3E2711', 20));
+
+  // 2) 巢体：外沿阴影 → 受光面 → 顶面（三层往里收，做出圆润的毛线卷边）
+  ell(g, 0, 0, RX, RY, col('#A2703A', 255));
+  ell(g, 0, 4, RX - 4, RY - 3, col('#CB9A5F', 255));
+  ell(g, 0, 9, RX - 13, RY - 11, col('#DDAF77', 255));
+
+  // 3) 毛线圈：外沿一圈短弧，逐段换色 + 轻微起伏，破掉「完美椭圆」
+  const N = 76;
+  const tones = ['#C2925C', '#D6A873', '#B0804F', '#DEB181'];
+  for (let i = 0; i < N; i++) {
+    const a0 = (i / N) * Math.PI * 2;
+    const a1 = a0 + (Math.PI * 2 / N) * 0.86;
+    const j = 1 + Math.sin(i * 7.13) * 0.014;
+    const far = Math.sin((a0 + a1) / 2) > 0;
+    arc(g, 0, 2, (RX - 2) * j, (RY - 2) * j, a0, a1, col(tones[i & 3], far ? 165 : 215), 5.5, 3);
+  }
+
+  // 4) 碗口：整体上移 → 前沿（下半圈）自然变厚
+  ell(g, 0, 15, RX - 30, RY - 14, col('#8A5A2C', 255));
+  ell(g, 0, 18, RX - 37, RY - 17, col('#6A4423', 255));
+
+  // 5) 内壁：远端压暗（光从左上来，碗内深处暗），碗底留一点暖光
+  arc(g, 0, 18, RX - 36, RY - 16, Math.PI * 0.10, Math.PI * 0.90, col('#41270F', 95), 11, 26);
+  arc(g, 0, 18, RX - 44, RY - 20, Math.PI * 0.16, Math.PI * 0.84, col('#301C08', 55), 9, 24);
+  ell(g, 0, 11, RX - 52, RY - 23, col('#96683A', 130));
+
+  // 6) 前沿高光：只在下半圈偏左亮一条，右半略暗 → 有方向感
+  arc(g, 0, 0, RX - 3, RY - 3, Math.PI * 1.10, Math.PI * 1.58, col('#FFE3B6', 165), 4.5, 18);
+  arc(g, 0, 4, RX - 9, RY - 8, Math.PI * 1.62, Math.PI * 1.92, col('#F3C68C', 110), 3.4, 14);
+
+  // 7) 绒线：几根短线压在卷边上，避免「光滑塑料圈」
+  const strands: number[][] = [
+    [-98, 6, -86, 16], [-74, -22, -62, -12], [-30, -38, -18, -28],
+    [26, -38, 40, -28], [70, -26, 82, -16], [96, 2, 106, 12],
+    [66, 26, 78, 34], [22, 38, 34, 44], [-26, 38, -14, 44], [-64, 26, -52, 34],
+  ];
+  for (const s2 of strands) {
+    polyline(g, [[s2[0], s2[1]], [s2[2], s2[3]]], col('#7A4E26', 120), 2.4);
+  }
+}
+
 // ===== 对外：光台（投影 + 光柱 + 台面光） =====
 
 export function createEggPedestal(st: EggStyle): Node {

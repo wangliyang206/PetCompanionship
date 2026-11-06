@@ -148,6 +148,23 @@ export class PetView extends Component {
     return this._stage === Stage.Egg;
   }
 
+  /**
+   * 3D 模型显隐（T25 修正）。
+   * 蛋阶段由 UI 的 2D 灵卵叠加层负责画面，3D 灰模会从 2D 灵卵后面露出一个灰色半圆
+   * （看上去就像蛋背后多了一块阴影），所以叠加层出现时必须把 3D 模型藏掉。
+   */
+  setModelVisible(visible: boolean): void {
+    if (this._modelVisible === visible) return;
+    this._modelVisible = visible;
+    this.applyModelVisibility();
+  }
+
+  private _modelVisible = true;
+
+  private applyModelVisibility(): void {
+    if (this._model) this._model.active = this._modelVisible;
+  }
+
   /** 行为标签变化 → 只换动画，不重载模型（T6） */
   private onBehaviorChanged = (petId: unknown, behavior: unknown): void => {
     const save = GameSave.data;
@@ -218,6 +235,7 @@ export class PetView extends Component {
         mr.materials = allMat;
       }
       this._model = node;
+      this.applyModelVisibility();
       this.fitModel(node, mesh, TARGET_HEIGHT[this._stage]);
       this.applyBehavior();
     });
@@ -274,6 +292,7 @@ export class PetView extends Component {
     if (fbMat) mr.material = fbMat;
     Color.fromHEX(this._themeColor, '#D9A066');
     this._model = node;
+    this.applyModelVisibility();
     this._baseScale = new Vec3(s, s, s);
     this._baseY = 0;
     this.applyBehavior();
