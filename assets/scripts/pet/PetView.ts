@@ -21,6 +21,35 @@ import { PetViewModel } from '../pet/PetViewModel';
 
 const { ccclass } = _decorator;
 
+/**
+ * 纯色材质（不引用任何贴图）。
+ * 注意：真机上 EffectAsset.get('builtin-standard') 可能为 null（内建 effect 未注册），
+ * 此时 Material.passes 长度为 0，赋给 MeshRenderer 会触发原生空指针（setSubModelMaterial）。
+ * 因此按候选 effect 依次尝试，且 passes 必须 > 0 才返回。
+ */
+export function makePlainMaterial(hex: string): Material | null {
+  const CANDIDATES = ['builtin-unlit', 'builtin-standard', 'legacy/standard'];
+  for (const name of CANDIDATES) {
+    try {
+      if (!EffectAsset.get(name)) continue;
+      const mat = new Material();
+      mat.initialize({ effectName: name });
+      if (mat.passes.length === 0) continue;
+      const c = new Color();
+      Color.fromHEX(c, hex);
+      mat.setProperty('albedo', c);
+      mat.setProperty('mainColor', c);
+      mat.setProperty('metallic', 0);
+      mat.setProperty('roughness', 0.85);
+      return mat;
+    } catch (e) {
+      console.warn('[PetView] 材质初始化失败:', name, e);
+    }
+  }
+  console.warn('[PetView] 无可用内建 effect，保留渲染器默认材质');
+  return null;
+}
+
 /** 模型目标高度（世界单位），按阶段微调 */
 const TARGET_HEIGHT: Record<Stage, number> = {
   [Stage.Egg]: 0.75,
@@ -120,7 +149,7 @@ export class PetView extends Component {
       node.setParent(this.node);
       const mr = node.addComponent(MeshRenderer);
       mr.mesh = mesh;
-      const mat = this.makeMaterial(themeHex);
+      const mat = makePlainMaterial(themeHex);
       if (mat) mr.material = mat;
       this._model = node;
       this.fitModel(node, mesh, TARGET_HEIGHT[this._stage]);
@@ -136,35 +165,6 @@ export class PetView extends Component {
     const segs = base.split('/');
     segs[segs.length - 1] = 'node_0';
     return segs.join('/');
-  }
-
-  /**
-   * 纯色材质（不引用任何贴图）。
-   * 注意：真机上 EffectAsset.get('builtin-standard') 可能为 null（内建 effect 未注册），
-   * 此时 Material.passes 长度为 0，赋给 MeshRenderer 会触发原生空指针（setSubModelMaterial）。
-   * 因此按候选 effect 依次尝试，且 passes 必须 > 0 才返回。
-   */
-  private makeMaterial(themeHex: string): Material | null {
-    const CANDIDATES = ['builtin-unlit', 'builtin-standard', 'legacy/standard'];
-    for (const name of CANDIDATES) {
-      try {
-        if (!EffectAsset.get(name)) continue;
-        const mat = new Material();
-        mat.initialize({ effectName: name });
-        if (mat.passes.length === 0) continue;
-        const c = new Color();
-        Color.fromHEX(c, themeHex);
-        mat.setProperty('albedo', c);
-        mat.setProperty('mainColor', c);
-        mat.setProperty('metallic', 0);
-        mat.setProperty('roughness', 0.85);
-        return mat;
-      } catch (e) {
-        console.warn('[PetView] 材质初始化失败:', name, e);
-      }
-    }
-    console.warn('[PetView] 无可用内建 effect，保留渲染器默认材质');
-    return null;
   }
 
   /** 按 Mesh 包围盒归一化高度，并把脚底对齐到 y=0 */
@@ -204,7 +204,7 @@ export class PetView extends Component {
     } catch (e) {
       console.warn('[PetView] 占位几何创建失败:', e);
     }
-    const fbMat = this.makeMaterial('#D9A066');
+    const fbMat = makePlainMaterial('#D9A066');
     if (fbMat) mr.material = fbMat;
     this._model = node;
     this._baseScale = new Vec3(s, s, s);

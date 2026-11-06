@@ -9,8 +9,8 @@ import { Stage } from './Enums';
 export const GameConfig = {
   // ===== 孵化 =====
   EGG: {
-    STARTER_HATCH_MIN: 15,              // 初始蛋 15 分钟（新手三选一）
-    STARTER_TOUCH_FAST_MIN: 5,          // 抚摸加速后最快 5 分钟（首次会话内破壳）
+    STARTER_HATCH_MIN: 1,               // 初始蛋 1 分钟（测试期临时缩短，上线前回调 15，见 docs/06 D17）
+    STARTER_TOUCH_FAST_MIN: 1,          // 抚摸加速后最快 1 分钟（测试期与总时长一致）
     NORMAL_HATCH_MIN: 240,              // 所有非初始蛋统一 4 小时（不得按稀有度区分！）
     NORMAL_TOUCH_REDUCE_MAX_MIN: 60,    // 抚摸累计最多缩短 60 分钟
     INCUBATION_SLOTS: 1,                // 同时只能孵 1 颗（硬阀门）
