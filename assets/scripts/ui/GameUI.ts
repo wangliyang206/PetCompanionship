@@ -938,7 +938,10 @@ export class GameUI extends Component {
 
   private refreshMissYou(): void {
     const save = GameSave.data;
-    const pet = save ? MissYouService.current(save) : null;
+    if (!save) return;
+    // 幂等：新孵化宠物当天也补选一次，避免"今日想见你"永远落在首批宠物上
+    MissYouService.ensureDaily(save);
+    const pet = MissYouService.current(save);
     if (!this._missYouPill || !this._missYouLb) return;
     if (!pet) {
       this._missYouPill.active = false;
