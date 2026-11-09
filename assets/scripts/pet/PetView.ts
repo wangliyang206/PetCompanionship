@@ -10,6 +10,7 @@
 import {
   _decorator, builtinResMgr, Component, EffectAsset, Material, MeshRenderer, Node,
   Tween, tween, Vec3, resources, Color, Mesh, Texture2D,
+  Prefab, instantiate, SkeletalAnimation, AnimationClip,
 } from 'cc';
 import { Behavior, Stage } from '../core/Enums';
 import { Events, EventName } from '../core/Events';
@@ -30,6 +31,22 @@ export function petMeshKey(path: string): string {
   segs[segs.length - 1] = 'node_0';
   return segs.join('/');
 }
+
+/** 是否骨骼模型（rigPet2 管线产出，目录名带 _rig） */
+export function isRigPath(path: string): boolean {
+  return /_rig(_[a-z]+)?\/[^/]+\.glb$/i.test(path) || /_rig\./i.test(path);
+}
+
+/** 骨骼模型的 Prefab 子资源 key：resources/models/<id>_rig/<id>_rig.glb
+ *  → models/<id>_rig/<id>_rig/<id>_rig（gltf-scene 子资源 = 同名 prefab） */
+export function rigPrefabKey(path: string): string {
+  const base = path.replace(/^resources\//, '').replace(/\.(glb|fbx)$/i, '');
+  const stem = base.split('/').pop() as string;
+  return `${base}/${stem}`;
+}
+
+/** 骨骼模型的源生高（rigPet2 管线统一归一化 0.35，fitModel 无法用——蒙皮网格包围盒不可靠） */
+export const RIG_SOURCE_HEIGHT = 0.35;
 
 /**
  * 纯色材质（不引用任何贴图）。
@@ -89,6 +106,15 @@ export function makePlainMaterial(hex: string): Material | null {
  *     → models/mao_tuantuan/baby_albedo
  */
 export function petAlbedoPath(modelPath: string): string {
+  // 骨骼模型贴图内嵌在 GLB 里（约 1MB，可直接用），但 PetPortrait 走的是
+  // 「静态 mesh + 独立 albedo」管线 —— 这里把 rig 路径映射回对应物种/阶段的
+  // 降采样 albedo，保证图鉴卡片仍显示带五官的宠物
+  const rigHit = /^resources\/models\/(tuantuan|changfeng)_rig(_adult|_final)?\//.exec(modelPath);
+  if (rigHit) {
+    // 长风暂无独立 albedo（PetDefs 里也用团团占位），两系都映射到团团贴图
+    const stage = rigHit[2] ? rigHit[2].slice(1) : 'baby';
+    return `models/mao_tuantuan/${stage}_albedo`;
+  }
   // 模型路径约定：resources/models/<id>/<id>_<stage>/<id>_<stage>.glb
   // 贴图和模型同放在 <id> 目录下：models/<id>/<stage>_albedo（不带 resources/ 前缀，
   // resources.load 的 key 不含 bundle 名）。
@@ -189,6 +215,11 @@ export class PetView extends Component {
   private _stage: Stage = Stage.Egg;
   private _dev = false;
   private _lastDevLog = 0;
+  /** 骨骼模型专用：骨骼动画组件 + 可用剪辑名 + 行走状态机 */
+  private _sAnim: SkeletalAnimation | null = null;
+  private _clips: string[] = [];
+  private _isMoving = false;
+  private _lastWp: Vec3 | null = null;
 
   onLoad(): void {
     this._dev = typeof location !== 'undefined' && /[?&]dev=1/.test(location.search);
@@ -203,6 +234,20 @@ export class PetView extends Component {
   }
 
   update(dt: number): void {
+    // 骨骼模型：WanderSystem/拖拽在挪节点时切 walk 剪辑，停下回到行为剪辑。
+    // 通过世界坐标增量判定位移（谁在挪这个节点都生效），阈值 0.05 单位/秒。
+    if (this._sAnim && this._stage !== Stage.Egg) {
+      const wp = this.node.worldPosition;
+      if (this._lastWp && dt > 0) {
+        const speed = Vec3.distance(wp, this._lastWp) / dt;
+        const moving = speed > 0.05;
+        if (moving !== this._isMoving) {
+          this._isMoving = moving;
+          this.playRigClip(moving ? 'walk' : this.behaviorClipName());
+        }
+      }
+      this._lastWp = wp.clone();
+    }
     if (!this._dev) return;
     const now = Date.now();
     if (now - this._lastDevLog < 2000) return;
@@ -300,8 +345,50 @@ export class PetView extends Component {
       this.applyBehavior();
       return;
     }
+    if (isRigPath(path)) {
+      this.loadRiggedModel(path);
+      return;
+    }
     this.loadModel(path, themeHex);
   };
+
+  /**
+   * 骨骼模型加载（rigPet2 管线）：整包加载 Prefab（含蒙皮网格/骨骼动画/贴图），
+   * SkeletalAnimation 驱动 idle/walk/happy。模型本身直立、脚底 y=0、高 0.35，
+   * 直接按 PET_TARGET_HEIGHT 放缩 —— 蒙皮网格包围盒运行时不可靠，不用 fitModel。
+   * 加载失败退回静态 mesh 管线（loadModel），保证有东西显示。
+   */
+  private loadRiggedModel(path: string): void {
+    const key = rigPrefabKey(path);
+    this._loadKey = path;
+    resources.load(key, Prefab, (err, prefab) => {
+      if (this._loadKey !== path) return; // 期间已切换
+      if (err || !prefab) {
+        console.warn('[PetView] 骨骼模型加载失败，退回静态管线:', key, err);
+        this.loadModel(path, '#D9A066');
+        return;
+      }
+      this.clearModel();
+      const holder = new Node('PetModelHolder');
+      holder.setParent(this.node);
+      const node = instantiate(prefab);
+      node.setParent(holder);
+      const scale = (PET_TARGET_HEIGHT[this._stage] ?? 0.85) / RIG_SOURCE_HEIGHT;
+      holder.setScale(scale, scale, scale);
+      this._model = holder;
+      this._holder = holder;
+      this._baseScale = new Vec3(scale, scale, scale);
+      this._baseY = 0;
+      this._sAnim = node.getComponent(SkeletalAnimation)
+        || node.getComponentInChildren(SkeletalAnimation);
+      this._clips = (this._sAnim ? this._sAnim.clips : []).filter(
+        (c): c is AnimationClip => !!c,
+      ).map((c) => c.name);
+      this.applyModelVisibility();
+      console.log('[PetView] 骨骼模型就位:', key, 'scale=', scale.toFixed(2), 'clips=', this._clips.join(','));
+      this.applyBehavior();
+    });
+  }
 
   /** 只加载模型的 Mesh 子资源，材质自建纯色/贴图。
    * 原因：美术 GLB 内嵌 3 张 4096×4096 贴图，真机（Mali-T820）上传时 GL_OUT_OF_MEMORY 直接 SIGSEGV；
@@ -408,6 +495,10 @@ export class PetView extends Component {
       this._holder.destroy();
     }
     this._holder = null;
+    this._sAnim = null;
+    this._clips = [];
+    this._isMoving = false;
+    this._lastWp = null;
   }
 
   // ===== 占位动画 =====
@@ -442,6 +533,19 @@ export class PetView extends Component {
   private playBehavior(behavior: Behavior): void {
     const model = this._model;
     if (!model) return;
+    // 骨骼模型分支：直接播骨骼剪辑（happy/idle），位移中不抢 walk 的台
+    if (this._sAnim) {
+      Tween.stopAllByTarget(model);
+      model.setScale(this._baseScale);
+      model.setPosition(0, this._baseY, 0);
+      if (behavior === Behavior.Sad) {
+        this.tint(model, new Color(150, 150, 150, 255));
+      } else {
+        this.tint(model, new Color(255, 255, 255, 255));
+      }
+      if (!this._isMoving) this.playRigClip(this.behaviorClipName(behavior));
+      return;
+    }
     Tween.stopAllByTarget(model);
     const s = this._baseScale;
     model.setScale(s);
@@ -486,6 +590,28 @@ export class PetView extends Component {
       .union()
       .repeatForever()
       .start();
+  }
+
+  /** 行为 → 骨骼剪辑名（Happy→happy，其余→idle；缺失时退回第一个剪辑） */
+  private behaviorClipName(behavior?: Behavior): string {
+    let b = behavior;
+    if (b === undefined) {
+      const save = GameSave.data;
+      const pet = save ? Collection.getActivePet(save) : undefined;
+      b = save && pet ? PetBehavior.evaluate(PetBehavior.computeInput(save, pet)) : Behavior.Calm;
+    }
+    const want = b === Behavior.Happy ? 'happy' : 'idle';
+    if (this._clips.includes(want)) return want;
+    return this._clips[0] ?? '';
+  }
+
+  /** 播骨骼剪辑（找不到精确名时按子串匹配；骨骼模型剪辑只有 idle/walk/happy） */
+  private playRigClip(name: string): void {
+    if (!this._sAnim || !name) return;
+    const hit = this._sAnim.clips.find((c) => !!c && c.name === name)
+      || this._sAnim.clips.find((c) => !!c && new RegExp(name, 'i').test(c.name));
+    if (!hit) return;
+    this._sAnim.crossFade(hit.name, 0.18);
   }
 
   // ===== 拖动/落点临时反应（T22）=====

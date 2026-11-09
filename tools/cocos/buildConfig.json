@@ -1,0 +1,16 @@
+{
+  "platform": "web-desktop",
+  "debug": true,
+  "buildPath": "E:/git/PetCompanionship/build",
+  "outputName": "hatchdemo",
+  "scenes": [
+    {
+      "url": "db://assets/scenes/PetRigDemo.scene",
+      "uuid": "9a7c1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d"
+    }
+  ],
+  "startScene": "9a7c1b2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+  "startSceneAssetBundle": false,
+  "manglePath": false,
+  "md5Cache": false
+}

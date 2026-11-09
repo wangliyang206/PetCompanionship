@@ -12,6 +12,10 @@ import { PetDefStatic, PetLines } from '../core/SaveData';
 const M = (stage: Stage, id: string): string => `resources/models/${id}/${id}_${stage}/${id}_${stage}.glb`;
 /** 缺少美术资源的物种：阶段模型先用团团占位（B1：其余两只有什么导什么，缺失用团团模型占位） */
 const M_FALLBACK = (stage: Stage): string => M(stage, 'mao_tuantuan');
+/** 骨骼模型路径（rigPet2 管线产出，直立/脚底 y=0/高 0.35，自带 idle/walk/happy 三段动画）。
+ *  蛋不需要骨骼，仍走静态模型 + UI 灵卵叠加层 */
+const RIG = (id: string, stage: 'baby' | 'adult' | 'final'): string =>
+  `resources/models/${id}_rig_${stage}/${id}_rig_${stage}.glb`.replace('_rig_baby', '_rig');
 const A = (arr: string[]): string[] => arr;
 
 export const PetDefs: Record<string, PetDefStatic> = {
@@ -21,15 +25,15 @@ export const PetDefs: Record<string, PetDefStatic> = {
     phase: 1, unlockLayer: 1, themeColor: '#D9A066', signature: 'signature_roll',
     models: {
       [Stage.Egg]: M(Stage.Egg, 'mao_tuantuan'),
-      [Stage.Baby]: M(Stage.Baby, 'mao_tuantuan'),
-      [Stage.Adult]: M(Stage.Adult, 'mao_tuantuan'),
-      [Stage.Final]: M(Stage.Final, 'mao_tuantuan'),
+      [Stage.Baby]: RIG('tuantuan', Stage.Baby),
+      [Stage.Adult]: RIG('tuantuan', Stage.Adult),
+      [Stage.Final]: RIG('tuantuan', Stage.Final),
     },
     anims: {
       [Stage.Egg]: ['egg_breathe', 'egg_sway'],
-      [Stage.Baby]: ['idle', 'happy', 'sad', 'pet', 'feed'],
-      [Stage.Adult]: ['idle', 'happy', 'sad', 'pet', 'feed', 'play', 'explore_ready'],
-      [Stage.Final]: ['idle', 'happy', 'sad', 'pet', 'feed', 'play', 'explore_ready', 'signature_roll'],
+      [Stage.Baby]: ['idle', 'happy', 'walk', 'sad', 'pet', 'feed'],
+      [Stage.Adult]: ['idle', 'happy', 'walk', 'sad', 'pet', 'feed', 'play', 'explore_ready'],
+      [Stage.Final]: ['idle', 'happy', 'walk', 'sad', 'pet', 'feed', 'play', 'explore_ready', 'signature_roll'],
     },
     lines: {
       happy: ['嘿嘿嘿~', '好舒服哦~', '最喜欢你了！'],
@@ -43,17 +47,17 @@ export const PetDefs: Record<string, PetDefStatic> = {
   mao_changfeng: {
     id: 'mao_changfeng', xi: Xi.Mao, name: '长风', rarity: Rarity.Rare,
     phase: 1, unlockLayer: 1, themeColor: '#8FB8C9', signature: 'signature_leap',
-    models: { // TODO(美术)：长风模型未产出，四阶段暂用团团占位
+    models: { // 2026-11-09：长风骨骼模型已产出（幼崽/成长/完全体），蛋仍用团团占位
       [Stage.Egg]: M_FALLBACK(Stage.Egg),
-      [Stage.Baby]: M_FALLBACK(Stage.Baby),
-      [Stage.Adult]: M_FALLBACK(Stage.Adult),
-      [Stage.Final]: M_FALLBACK(Stage.Final),
+      [Stage.Baby]: RIG('changfeng', Stage.Baby),
+      [Stage.Adult]: RIG('changfeng', Stage.Adult),
+      [Stage.Final]: RIG('changfeng', Stage.Final),
     },
     anims: {
       [Stage.Egg]: ['egg_breathe', 'egg_sway'],
-      [Stage.Baby]: ['idle', 'happy', 'sad', 'pet', 'feed'],
-      [Stage.Adult]: ['idle', 'happy', 'sad', 'pet', 'feed', 'play', 'explore_ready'],
-      [Stage.Final]: ['idle', 'happy', 'sad', 'pet', 'feed', 'play', 'explore_ready', 'signature_leap'],
+      [Stage.Baby]: ['idle', 'happy', 'walk', 'sad', 'pet', 'feed'],
+      [Stage.Adult]: ['idle', 'happy', 'walk', 'sad', 'pet', 'feed', 'play', 'explore_ready'],
+      [Stage.Final]: ['idle', 'happy', 'walk', 'sad', 'pet', 'feed', 'play', 'explore_ready', 'signature_leap'],
     },
     lines: {
       happy: ['呜……不怕不怕。', '刚才只是……有点吓到啦。', '……我蹭你一下。'],

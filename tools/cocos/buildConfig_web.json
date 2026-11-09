@@ -1,0 +1,16 @@
+{
+  "platform": "web-desktop",
+  "debug": true,
+  "buildPath": "E:/git/PetCompanionship/build",
+  "outputName": "web-demo",
+  "scenes": [
+    {
+      "url": "db://assets/scenes/Main.scene",
+      "uuid": "7f2e9c1a-4b3d-4e8f-a6c5-9d0e1b2a3f4d"
+    }
+  ],
+  "startScene": "7f2e9c1a-4b3d-4e8f-a6c5-9d0e1b2a3f4d",
+  "startSceneAssetBundle": false,
+  "manglePath": false,
+  "md5Cache": false
+}
